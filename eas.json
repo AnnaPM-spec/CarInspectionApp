@@ -1,0 +1,23 @@
+{
+  "build": {
+    "development": {
+      "channel": "development",
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "preview": {
+      "channel": "preview",
+      "distribution": "internal"
+    },
+    "production": {
+      "channel": "production",
+      "distribution": "store"
+    }
+  },
+  "cli": {
+    "version": ">= 3.0.0"
+  }
+}
