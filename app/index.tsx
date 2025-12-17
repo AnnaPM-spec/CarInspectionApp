@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Plus, Car, Clock, ExternalLink } from 'lucide-react-native';
+import { Plus, Car, Clock, ExternalLink, Settings } from 'lucide-react-native';
 import React from 'react';
 import {
   View,
@@ -24,7 +24,9 @@ export default function HomeScreen() {
     );
   }
 
-  if (!yandexAuth) {
+  const showWelcome = !yandexAuth && inspections.length === 0;
+
+  if (showWelcome) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
         <View style={styles.emptyContainer}>
@@ -38,6 +40,12 @@ export default function HomeScreen() {
             onPress={() => router.push('/auth')}
           >
             <Text style={styles.connectButtonText}>Подключить Яндекс Диск</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => router.push('/new-inspection')}
+          >
+            <Text style={styles.skipButtonText}>Пропустить (демо режим)</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -55,16 +63,24 @@ export default function HomeScreen() {
             {inspections.length} {inspections.length === 1 ? 'осмотр' : 'осмотров'}
           </Text>
         </View>
-        <TouchableOpacity
-          style={[
-            styles.newButton,
-            activeInspection && styles.newButtonDisabled,
-          ]}
-          onPress={() => router.push('/new-inspection')}
-          disabled={!!activeInspection}
-        >
-          <Plus size={24} color="#FFF" strokeWidth={2.5} />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={() => router.push('/auth')}
+          >
+            <Settings size={24} color="#007AFF" strokeWidth={2} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.newButton,
+              activeInspection && styles.newButtonDisabled,
+            ]}
+            onPress={() => router.push('/new-inspection')}
+            disabled={!!activeInspection}
+          >
+            <Plus size={24} color="#FFF" strokeWidth={2.5} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {activeInspection && (
@@ -178,6 +194,17 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: '#FFF',
   },
+  skipButton: {
+    marginTop: 16,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 14,
+  },
+  skipButtonText: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    color: '#8E8E93',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -196,6 +223,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#8E8E93',
     marginTop: 2,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  settingsButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
   },
   newButton: {
     width: 56,
