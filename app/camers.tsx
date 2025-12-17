@@ -1,6 +1,6 @@
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import { X, Camera, Images, FlipHorizontal } from 'lucide-react-native';
+import { CameraView, CameraType, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { X, Camera, Images, FlipHorizontal, Video as VideoIcon } from 'lucide-react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -12,16 +12,21 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
-import { Photo } from '../types/inspection';
+import { Photo, Video } from '../types/inspection';
 
 export default function CameraScreen() {
   const router = useRouter();
   const { inspectionId } = useLocalSearchParams<{ inspectionId: string }>();
-  const { inspections, addPhoto } = useInspections();
+  const { inspections, addPhoto, addVideo } = useInspections();
   const [facing, setFacing] = useState<CameraType>('back');
-  const [permission, requestPermission] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mode, setMode] = useState<'photo' | 'video'>('photo');
   const cameraRef = useRef<CameraView>(null);
+  const recordingStartTime = useRef<number | null>(null);
+  const recordingPromise = useRef<Promise<any> | null>(null);
 
   const inspection = inspections.find(i => i.id === inspectionId);
 
@@ -30,10 +35,12 @@ export default function CameraScreen() {
       inspectionId,
       hasInspection: !!inspection,
       inspectionPhotos: inspection?.photos.length,
+      inspectionVideos: inspection?.videos.length,
+      mode,
     });
-  }, [inspectionId, inspection]);
+  }, [inspectionId, inspection, mode]);
 
-  if (!permission) {
+  if (!cameraPermission || !microphonePermission) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -41,17 +48,22 @@ export default function CameraScreen() {
     );
   }
 
-  if (!permission.granted) {
+  const requestPermissions = async () => {
+    await requestCameraPermission();
+    await requestMicrophonePermission();
+  };
+
+  if (!cameraPermission.granted || !microphonePermission.granted) {
     return (
       <SafeAreaView style={styles.centerContainer}>
         <Camera size={64} color="#007AFF" strokeWidth={1.5} />
         <Text style={styles.permissionTitle}>Доступ к камере</Text>
         <Text style={styles.permissionText}>
-          Разрешите доступ к камере для съемки фото автомобиля
+          Разрешите доступ к камере и микрофону для съемки фото и видео автомобиля
         </Text>
         <TouchableOpacity
           style={styles.permissionButton}
-          onPress={requestPermission}
+          onPress={requestPermissions}
         >
           <Text style={styles.permissionButtonText}>Разрешить</Text>
         </TouchableOpacity>
@@ -60,6 +72,18 @@ export default function CameraScreen() {
   }
 
   const handleCapture = async () => {
+    if (mode === 'video') {
+      if (isRecording) {
+        await handleStopRecording();
+      } else {
+        await handleStartRecording();
+      }
+    } else {
+      await handleTakePhoto();
+    }
+  };
+
+  const handleTakePhoto = async () => {
     console.log('=== CAPTURE BUTTON PRESSED ===');
     console.log('Platform:', Platform.OS);
     console.log('Has camera ref:', !!cameraRef.current);
@@ -128,8 +152,125 @@ export default function CameraScreen() {
     }
   };
 
+  const handleStartRecording = async () => {
+    console.log('=== START RECORDING ===');
+    console.log('Platform:', Platform.OS);
+    console.log('Camera ref exists:', !!cameraRef.current);
+    console.log('Is already recording:', isRecording);
+    
+    if (!cameraRef.current || isRecording) {
+      console.log('Cannot start recording:', { hasRef: !!cameraRef.current, isRecording });
+      return;
+    }
+
+    setIsRecording(true);
+    recordingStartTime.current = Date.now();
+    console.log('Starting video recording at:', recordingStartTime.current);
+    
+    try {
+      const recordOptions = Platform.OS === 'ios' ? {
+        maxDuration: 60,
+      } : {
+        maxDuration: 60,
+        maxFileSize: 100 * 1024 * 1024,
+      };
+      
+      console.log('Record options:', recordOptions);
+      recordingPromise.current = cameraRef.current.recordAsync(recordOptions);
+      console.log('recordAsync() called, promise saved');
+    } catch (error) {
+      console.error('=== RECORDING START ERROR ===');
+      console.error('Error:', error);
+      if (error instanceof Error) {
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+      setIsRecording(false);
+      recordingStartTime.current = null;
+      recordingPromise.current = null;
+    }
+  };
+
+  const handleStopRecording = async () => {
+    console.log('=== STOP RECORDING ===');
+    console.log('Camera ref exists:', !!cameraRef.current);
+    console.log('Is recording:', isRecording);
+    console.log('Has recording promise:', !!recordingPromise.current);
+    
+    if (!cameraRef.current || !isRecording || !recordingPromise.current) {
+      console.log('Cannot stop recording:', { hasRef: !!cameraRef.current, isRecording, hasPromise: !!recordingPromise.current });
+      return;
+    }
+
+    const MIN_RECORDING_DURATION = 3000;
+    const recordingDuration = recordingStartTime.current ? Date.now() - recordingStartTime.current : 0;
+    
+    console.log('Current recording duration:', recordingDuration, 'ms');
+    console.log('Minimum required duration:', MIN_RECORDING_DURATION, 'ms');
+    
+    if (recordingDuration < MIN_RECORDING_DURATION) {
+      console.log('Recording too short, waiting...', { recordingDuration, minRequired: MIN_RECORDING_DURATION });
+      const waitTime = MIN_RECORDING_DURATION - recordingDuration;
+      console.log('Waiting additional', waitTime, 'ms');
+      await new Promise(resolve => setTimeout(resolve, waitTime + 200));
+      console.log('Wait complete');
+    }
+
+    try {
+      const finalDuration = Date.now() - (recordingStartTime.current || 0);
+      console.log('About to stop recording after', finalDuration, 'ms');
+      
+      cameraRef.current.stopRecording();
+      console.log('stopRecording() called successfully');
+      console.log('Waiting for recordAsync promise to resolve...');
+      
+      const video = await recordingPromise.current;
+      console.log('Promise resolved successfully!');
+      console.log('Video object:', JSON.stringify(video, null, 2));
+      
+      if (video && video.uri) {
+        console.log('Video URI exists:', video.uri);
+        const newVideo: Video = {
+          id: Date.now().toString(),
+          uri: video.uri,
+          timestamp: Date.now(),
+        };
+        
+        console.log('Adding video to inspection:', inspectionId);
+        console.log('Video data:', newVideo);
+        addVideo(inspectionId as string, newVideo);
+        console.log('Video added successfully to inspection');
+      } else {
+        console.error('Video object is missing URI!');
+        console.error('Full video object:', video);
+      }
+    } catch (error) {
+      console.error('=== RECORDING ERROR ===');
+      console.error('Error type:', typeof error);
+      console.error('Error:', error);
+      if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+    } finally {
+      console.log('Cleaning up recording state...');
+      setIsRecording(false);
+      recordingStartTime.current = null;
+      recordingPromise.current = null;
+      console.log('=== END RECORDING ===');
+    }
+  };
+
   const toggleCameraFacing = () => {
     setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
+  const toggleMode = () => {
+    if (isRecording) {
+      return;
+    }
+    setMode(current => (current === 'photo' ? 'video' : 'photo'));
   };
 
   const handleClose = () => {
@@ -156,7 +297,7 @@ export default function CameraScreen() {
                 {inspection?.carBrand || inspection?.carModel}
               </Text>
               <Text style={styles.photoCount}>
-                {inspection?.photos.length || 0} фото
+                {inspection?.photos.length || 0} фото · {inspection?.videos.length || 0} видео
               </Text>
             </View>
             <TouchableOpacity
@@ -177,17 +318,39 @@ export default function CameraScreen() {
 
             <TouchableOpacity
               style={[
-                styles.captureButton,
-                isCapturing && styles.captureButtonDisabled,
+                mode === 'photo' ? styles.captureButton : styles.recordButton,
+                (isCapturing || (isRecording && mode === 'photo')) && styles.captureButtonDisabled,
+                isRecording && styles.recordingButton,
               ]}
               onPress={handleCapture}
-              disabled={isCapturing}
+              disabled={isCapturing && mode === 'photo'}
             >
-              <View style={styles.captureButtonInner} />
+              {mode === 'photo' ? (
+                <View style={styles.captureButtonInner} />
+              ) : (
+                <View style={[styles.recordButtonInner, isRecording && styles.recordingButtonInner]} />
+              )}
             </TouchableOpacity>
 
-            <View style={styles.galleryButton} />
+            <TouchableOpacity
+              style={styles.galleryButton}
+              onPress={toggleMode}
+              disabled={isRecording}
+            >
+              {mode === 'photo' ? (
+                <VideoIcon size={28} color="#FFF" strokeWidth={2} />
+              ) : (
+                <Camera size={28} color="#FFF" strokeWidth={2} />
+              )}
+            </TouchableOpacity>
           </View>
+
+          {isRecording && (
+            <View style={styles.recordingIndicator}>
+              <View style={styles.recordingDot} />
+              <Text style={styles.recordingText}>Запись...</Text>
+            </View>
+          )}
         </SafeAreaView>
       </CameraView>
     </View>
@@ -284,6 +447,54 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderWidth: 2,
     borderColor: '#000',
+  },
+  recordButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#FFF',
+  },
+  recordingButton: {
+    backgroundColor: 'rgba(255, 59, 48, 0.3)',
+    borderColor: '#FF3B30',
+  },
+  recordButtonInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FF3B30',
+  },
+  recordingButtonInner: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+  },
+  recordingIndicator: {
+    position: 'absolute',
+    top: 80,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 59, 48, 0.9)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFF',
+    marginRight: 8,
+  },
+  recordingText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '600' as const,
   },
   permissionTitle: {
     fontSize: 24,
