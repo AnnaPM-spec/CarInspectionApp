@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback } from 'react';
-import { Inspection, Photo, YandexDiskAuth } from '@/types/inspection';
+import { Inspection, Photo, Video, YandexDiskAuth } from '@/types/inspection';
 
 const INSPECTIONS_STORAGE_KEY = 'inspections';
 const YANDEX_AUTH_STORAGE_KEY = 'yandex_auth';
@@ -57,6 +57,7 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
       carModel,
       startTime: Date.now(),
       photos: [],
+      videos: [],
       status: 'active',
     };
 
@@ -71,6 +72,19 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
         return {
           ...inspection,
           photos: [...inspection.photos, photo],
+        };
+      }
+      return inspection;
+    });
+    saveInspections(updated);
+  }, [inspections]);
+
+  const addVideo = useCallback((inspectionId: string, video: Video) => {
+    const updated = inspections.map(inspection => {
+      if (inspection.id === inspectionId) {
+        return {
+          ...inspection,
+          videos: [...inspection.videos, video],
         };
       }
       return inspection;
@@ -132,6 +146,7 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
     isLoading,
     createInspection,
     addPhoto,
+    addVideo,
     completeInspection,
     updateInspectionStatus,
     deleteInspection,
