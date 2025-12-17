@@ -7,6 +7,7 @@ import {
   Trash2,
   Clock,
   CheckCircle2,
+  PlayCircle,
 } from 'lucide-react-native';
 import React, { useState } from 'react';
 import {
@@ -22,6 +23,7 @@ import {
   Clipboard,
   Platform,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../../context/InspectionContext';
 import {
@@ -73,14 +75,24 @@ export default function InspectionDetailsScreen() {
       return;
     }
 
-    if (inspection.photos.length === 0) {
-      Alert.alert('Ошибка', 'Нет фото для загрузки');
+    const totalMedia = inspection.photos.length + inspection.videos.length;
+    if (totalMedia === 0) {
+      Alert.alert('Ошибка', 'Нет фото или видео для загрузки');
       return;
+    }
+
+    let mediaText = '';
+    if (inspection.photos.length > 0 && inspection.videos.length > 0) {
+      mediaText = `${inspection.photos.length} фото и ${inspection.videos.length} видео`;
+    } else if (inspection.photos.length > 0) {
+      mediaText = `${inspection.photos.length} фото`;
+    } else {
+      mediaText = `${inspection.videos.length} видео`;
     }
 
     Alert.alert(
       'Завершить осмотр?',
-      `Будет загружено ${inspection.photos.length} фото на Яндекс Диск. После завершения нельзя будет добавить новые фото.`,
+      `Будет загружено ${mediaText} на Яндекс Диск. После завершения нельзя будет добавить новые файлы.`,
       [
         { text: 'Отмена', style: 'cancel' },
         {
@@ -122,6 +134,13 @@ export default function InspectionDetailsScreen() {
           const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
           const filePath = `${folderPath}/${fileName}`;
           await uploadFile(yandexAuth, filePath, photo.uri);
+        }
+
+        for (let i = 0; i < inspection.videos.length; i++) {
+          const video = inspection.videos[i];
+          const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
+          const filePath = `${folderPath}/${fileName}`;
+          await uploadFile(yandexAuth, filePath, video.uri);
         }
 
         const publicUrl = await publishFolder(yandexAuth, folderPath);
@@ -211,25 +230,62 @@ export default function InspectionDetailsScreen() {
             </Text>
           </View>
 
-          <Text style={styles.photoCount}>
-            {inspection.photos.length} {inspection.photos.length === 1 ? 'фото' : 'фото'}
-          </Text>
+          <View style={styles.mediaCountRow}>
+            {inspection.photos.length > 0 && (
+              <Text style={styles.photoCount}>
+                {inspection.photos.length} фото
+              </Text>
+            )}
+            {inspection.videos.length > 0 && (
+              <Text style={styles.videoCount}>
+                {inspection.videos.length} видео
+              </Text>
+            )}
+          </View>
         </View>
 
-        {inspection.photos.length > 0 ? (
-          <View style={styles.photoGrid}>
-            {inspection.photos.map(photo => (
-              <View key={photo.id} style={styles.photoContainer}>
-                <Image source={{ uri: photo.uri }} style={styles.photo} />
+        {inspection.photos.length > 0 || inspection.videos.length > 0 ? (
+          <View>
+            {inspection.photos.length > 0 && (
+              <View>
+                <Text style={styles.sectionTitle}>Фото ({inspection.photos.length})</Text>
+                <View style={styles.photoGrid}>
+                  {inspection.photos.map(photo => (
+                    <View key={photo.id} style={styles.photoContainer}>
+                      <Image source={{ uri: photo.uri }} style={styles.photo} />
+                    </View>
+                  ))}
+                </View>
               </View>
-            ))}
+            )}
+            
+            {inspection.videos.length > 0 && (
+              <View>
+                <Text style={styles.sectionTitle}>Видео ({inspection.videos.length})</Text>
+                <View style={styles.videoGrid}>
+                  {inspection.videos.map(video => (
+                    <View key={video.id} style={styles.videoContainer}>
+                      <Video
+                        source={{ uri: video.uri }}
+                        style={styles.video}
+                        useNativeControls
+                        resizeMode={ResizeMode.COVER}
+                      />
+                      <View style={styles.videoOverlay}>
+                        <PlayCircle size={48} color="#FFF" strokeWidth={2} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
           </View>
         ) : (
           <View style={styles.emptyState}>
             <Camera size={64} color="#C7C7CC" strokeWidth={1.5} />
-            <Text style={styles.emptyText}>Фото пока нет</Text>
+            <Text style={styles.emptyText}>Файлов пока нет</Text>
             <Text style={styles.emptySubtext}>
-              Нажмите кнопку камеры, чтобы сделать фото
+              Нажмите кнопку камеры, чтобы сделать фото или видео
             </Text>
           </View>
         )}
@@ -248,11 +304,11 @@ export default function InspectionDetailsScreen() {
             <TouchableOpacity
               style={[
                 styles.uploadButton,
-                (isUploading || inspection.photos.length === 0) &&
+                (isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)) &&
                   styles.uploadButtonDisabled,
               ]}
               onPress={handleUploadToYandex}
-              disabled={isUploading || inspection.photos.length === 0}
+              disabled={isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)}
             >
               {isUploading ? (
                 <ActivityIndicator color="#FFF" />
@@ -370,10 +426,27 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#8E8E93',
   },
+  mediaCountRow: {
+    flexDirection: 'row',
+    gap: 16,
+  },
   photoCount: {
     fontSize: 17,
     fontWeight: '600' as const,
     color: '#000',
+  },
+  videoCount: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    color: '#000',
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: '600' as const,
+    color: '#000',
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 12,
   },
   photoGrid: {
     flexDirection: 'row',
@@ -391,6 +464,32 @@ const styles = StyleSheet.create({
   photo: {
     width: '100%',
     height: '100%',
+  },
+  videoGrid: {
+    padding: 15,
+    gap: 12,
+  },
+  videoContainer: {
+    width: '100%',
+    height: 240,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none',
   },
   emptyState: {
     paddingVertical: 80,
