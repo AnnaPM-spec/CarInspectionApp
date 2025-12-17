@@ -7,74 +7,96 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   Linking,
-  Platform,
+  ActivityIndicator,
 } from 'react-native';
+import * as Crypto from 'expo-crypto';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
 
 WebBrowser.maybeCompleteAuthSession();
 
+const YANDEX_CLIENT_ID = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
+
 export default function AuthScreen() {
   const router = useRouter();
   const { yandexAuth, saveYandexAuth, clearYandexAuth } = useInspections();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-  const handleAuth = async () => {
-    if (Platform.OS === 'web') {
+
+
+  const handleConnect = async () => {
+    if (!YANDEX_CLIENT_ID) {
       Alert.alert(
-        'Демо режим',
-        'Для демонстрации используется тестовый токен. В реальном приложении здесь будет OAuth авторизация.',
+        'Ошибка конфигурации',
+        'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали iOS App ID: app.rork.6aycdrbhipych60l9qhmv\n3. Указали Android Package Name: app.rork.6aycdrbhipych60l9qhmv\n4. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
         [
-          {
-            text: 'ОК',
-            onPress: () => {
-              saveYandexAuth({
-                accessToken: 'demo_token_for_testing',
-                expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-              });
-              router.back();
-            },
-          },
+          { text: 'Открыть регистрацию', onPress: () => Linking.openURL('https://oauth.yandex.ru/client/new') },
+          { text: 'Закрыть', style: 'cancel' }
         ]
       );
       return;
     }
 
     try {
-      setIsLoading(true);
+      setIsAuthenticating(true);
 
-      Alert.alert(
-        'Настройка OAuth',
-        'Для работы с Яндекс Диском необходимо:\n\n1. Создать приложение в Яндекс OAuth\n2. Получить Client ID\n3. Настроить Redirect URI\n\nСейчас используется демо-токен для тестирования.',
-        [
-          {
-            text: 'Инструкция',
-            onPress: () => {
-              Linking.openURL('https://yandex.ru/dev/oauth/');
-            },
-          },
-          {
-            text: 'Использовать демо',
-            onPress: () => {
-              saveYandexAuth({
-                accessToken: 'demo_token_for_testing',
-                expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-              });
-              router.back();
-            },
-          },
-        ]
+      const deviceId = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        Date.now().toString() + Math.random().toString()
       );
+
+      const redirectUri = `yx${YANDEX_CLIENT_ID}://callback`;
+      const authUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${YANDEX_CLIENT_ID}&device_id=${deviceId}&device_name=CarInspectionApp`;
+
+      console.log('=== Yandex Auth Debug (Implicit Flow) ===');
+      console.log('Client ID:', YANDEX_CLIENT_ID);
+      console.log('Device ID:', deviceId);
+      console.log('Redirect URI:', redirectUri);
+      console.log('Auth URL:', authUrl);
+
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+
+      console.log('Auth result:', result);
+
+      if (result.type === 'success' && result.url) {
+        const url = result.url;
+        const hashParams = url.split('#')[1];
+        
+        if (hashParams) {
+          const params = new URLSearchParams(hashParams);
+          const accessToken = params.get('access_token');
+          const expiresIn = params.get('expires_in');
+
+          if (accessToken) {
+            const expiresAt = Date.now() + (parseInt(expiresIn || '31536000', 10) * 1000);
+            
+            await saveYandexAuth({
+              accessToken,
+              expiresAt,
+            });
+
+            Alert.alert('Успешно', 'Яндекс Диск подключен');
+            router.back();
+          } else {
+            Alert.alert('Ошибка', 'Не удалось получить токен доступа');
+          }
+        } else {
+          Alert.alert('Ошибка', 'Не удалось получить токен авторизации');
+        }
+      } else if (result.type === 'cancel') {
+        console.log('Auth cancelled by user');
+      }
     } catch (error) {
       console.error('Auth error:', error);
-      Alert.alert('Ошибка', 'Не удалось авторизоваться');
+      Alert.alert('Ошибка', 'Не удалось выполнить авторизацию');
     } finally {
-      setIsLoading(false);
+      setIsAuthenticating(false);
     }
   };
+
+
 
   const handleDisconnect = () => {
     Alert.alert(
@@ -93,6 +115,8 @@ export default function AuthScreen() {
       ]
     );
   };
+
+
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -169,17 +193,31 @@ export default function AuthScreen() {
             <Text style={styles.disconnectButtonText}>Отключить</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            style={[styles.connectButton, isLoading && styles.connectButtonDisabled]}
-            onPress={handleAuth}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
-              <Text style={styles.connectButtonText}>Подключить Яндекс Диск</Text>
-            )}
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={[styles.connectButton, isAuthenticating && styles.connectButtonDisabled]}
+              onPress={handleConnect}
+              disabled={isAuthenticating}
+            >
+              {isAuthenticating ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.connectButtonText}>Подключить Яндекс Диск</Text>
+              )}
+            </TouchableOpacity>
+            
+            <Text style={styles.instructionText}>
+              После нажатия откроется браузер для авторизации в Яндексе
+            </Text>
+            
+            <TouchableOpacity
+              style={styles.helpButton}
+              onPress={() => Linking.openURL('https://yandex.ru/dev/id/doc/ru/register-client')}
+            >
+              <ExternalLink size={16} color="#8E8E93" strokeWidth={2} />
+              <Text style={styles.helpButtonText}>Как создать приложение</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </SafeAreaView>
@@ -272,13 +310,15 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 0 : 20,
+    paddingBottom: 8,
   },
   connectButton: {
     backgroundColor: '#007AFF',
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 56,
     shadowColor: '#007AFF',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -308,5 +348,24 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600' as const,
     color: '#FF3B30',
+  },
+  instructionText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 20,
+  },
+  helpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 12,
+    gap: 6,
+  },
+  helpButtonText: {
+    fontSize: 15,
+    color: '#8E8E93',
   },
 });
