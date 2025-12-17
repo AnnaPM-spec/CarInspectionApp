@@ -1,8 +1,5 @@
 import { YandexDiskAuth } from '../types/inspection';
 
-const YANDEX_CLIENT_ID = 'YOUR_CLIENT_ID';
-const YANDEX_AUTH_URL = 'https://oauth.yandex.ru/authorize';
-const YANDEX_TOKEN_URL = 'https://oauth.yandex.ru/token';
 const YANDEX_API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 
 export interface YandexDiskFile {
@@ -12,15 +9,7 @@ export interface YandexDiskFile {
   public_url?: string;
 }
 
-export const getYandexAuthUrl = (redirectUri: string): string => {
-  const params = new URLSearchParams({
-    response_type: 'token',
-    client_id: YANDEX_CLIENT_ID,
-    redirect_uri: redirectUri,
-    display: 'popup',
-  });
-  return `${YANDEX_AUTH_URL}?${params.toString()}`;
-};
+
 
 export const createFolder = async (
   auth: YandexDiskAuth,
