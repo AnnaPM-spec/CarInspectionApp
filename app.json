@@ -34,7 +34,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.6aycdrbhipych60l9qhmv",
+      "package": "app.rork.carinspectionapp",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO"
