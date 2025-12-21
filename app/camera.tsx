@@ -153,7 +153,7 @@ export default function CameraScreen() {
   };
 
   const handleStartRecording = async () => {
-  console.log('=== START RECORDING (SIMPLIFIED) ===');
+  console.log('=== START RECORDING (CORRECTED) ===');
   
   if (!cameraRef.current || isRecording) {
     console.log('Cannot start recording');
@@ -165,7 +165,6 @@ export default function CameraScreen() {
   console.log('Recording start time set:', recordingStartTime.current);
 
   try {
-    // ВАЖНО: сохраняем promise, но НЕ вызываем stopRecording() позже
     const recordOptions = Platform.OS === 'ios' ? {
       maxDuration: 60,
     } : {
@@ -173,45 +172,62 @@ export default function CameraScreen() {
       maxFileSize: 100 * 1024 * 1024,
     };
     
+    // ЗАПУСКАЕМ запись, но НЕ ждём сразу
     recordingPromise.current = cameraRef.current.recordAsync(recordOptions);
-    console.log('Recording started, promise saved');
+    console.log('Recording STARTED, promise saved (not awaited yet)');
     
-    // Сразу ждём завершения promise (это и будет окончание записи)
-    const video = await recordingPromise.current;
-    console.log('Recording finished naturally');
-    
-    // Обработка результата
-    if (video && video.uri) {
-      console.log('Video URI:', video.uri);
-      const newVideo: Video = {
-        id: Date.now().toString(),
-        uri: video.uri,
-        timestamp: Date.now(),
-      };
-      
-      console.log('Adding video to inspection');
-      addVideo(inspectionId as string, newVideo);
-    } else {
-      console.error('Video object is missing URI:', video);
-    }
+    // Теперь запись действительно идёт
+    // Ожидание результата будет в handleStopRecording
   } catch (error) {
-    console.error('=== RECORDING ERROR ===');
+    console.error('=== RECORDING START ERROR ===');
     console.error('Error:', error);
-  } finally {
-    console.log('Cleaning up recording state');
     setIsRecording(false);
     recordingStartTime.current = null;
     recordingPromise.current = null;
   }
 };
   const handleStopRecording = async () => {
-  console.log('=== STOP RECORDING (SIMPLIFIED) ===');
+  console.log('=== STOP RECORDING (CORRECTED) ===');
   
-  // Просто останавливаем запись, не ждём promise
-  if (cameraRef.current && isRecording) {
-    console.log('Stopping recording...');
+  if (!cameraRef.current || !isRecording || !recordingPromise.current) {
+    console.log('Cannot stop recording');
+    return;
+  }
+
+  console.log('Calling stopRecording()...');
+  
+  try {
+    // 1. Останавливаем запись
     cameraRef.current.stopRecording();
-    // Состояние очистится в finally блока handleStartRecording
+    console.log('stopRecording() called');
+    
+    // 2. Ждём результат promise (который создали в handleStartRecording)
+    console.log('Waiting for recording promise to resolve...');
+    const video = await recordingPromise.current;
+    console.log('Recording promise RESOLVED!');
+    
+    if (video && video.uri) {
+      console.log('Video URI received:', video.uri);
+      const newVideo: Video = {
+        id: Date.now().toString(),
+        uri: video.uri,
+        timestamp: Date.now(),
+      };
+      
+      console.log('Adding video to inspection:', inspectionId);
+      addVideo(inspectionId as string, newVideo);
+      console.log('Video added successfully');
+    } else {
+      console.error('Video object is missing URI:', video);
+    }
+  } catch (error) {
+    console.error('=== RECORDING STOP ERROR ===');
+    console.error('Error:', error);
+  } finally {
+    console.log('Cleaning up recording state');
+    setIsRecording(false);
+    recordingStartTime.current = null;
+    recordingPromise.current = null;
   }
 };
 
