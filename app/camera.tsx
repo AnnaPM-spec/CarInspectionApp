@@ -153,7 +153,9 @@ export default function CameraScreen() {
   };
 
   const handleStartRecording = async () => {
-  console.log('=== START RECORDING (CORRECTED) ===');
+    console.log('🎬 DEBUG: handleStartRecording called at', new Date().toISOString());
+    console.log('📱 Device platform:', Platform.OS);
+    console.log('=== START RECORDING (CORRECTED) ===');
   
   if (!cameraRef.current || isRecording) {
     console.log('Cannot start recording');
