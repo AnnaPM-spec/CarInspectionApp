@@ -1,4 +1,4 @@
-import { YandexDiskAuth } from '../types/inspection';
+import { YandexDiskAuth } from '../types/inspections';
 
 const YANDEX_API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 
