@@ -154,31 +154,21 @@ export default function CameraScreen() {
   };
 
   const handleStartRecording = async () => {
-    console.log('🎬 DEBUG: handleStartRecording called at', new Date().toISOString());
-    console.log('📱 Device platform:', Platform.OS);
-    console.log('=== START RECORDING (CORRECTED) ===');
+  console.log('=== START RECORDING (NEW APPROACH) ===');
   
   if (!cameraRef.current || isRecording) {
     console.log('Cannot start recording');
     return;
   }
 
-  setIsRecording(true);
-  recordingStartTime.current = Date.now();
-  console.log('Recording start time set:', recordingStartTime.current);
-
   try {
-  const recordOptions = {
-  maxDuration: 10, // Сначала протестируйте с очень короткой записью (10 сек)
-  // Уберите maxFileSize для теста
-};
+    setIsRecording(true);
+    recordingStartTime.current = Date.now();
     
-    // ЗАПУСКАЕМ запись, но НЕ ждём сразу
-    recordingPromise.current = cameraRef.current.recordAsync(recordOptions);
-    console.log('Recording STARTED, promise saved (not awaited yet)');
+    // Вариант 1: Без параметров вообще
+    recordingPromise.current = cameraRef.current.recordAsync();
     
-    // Теперь запись действительно идёт
-    // Ожидание результата будет в handleStopRecording
+    console.log('Recording STARTED with simple recordAsync()');
   } catch (error) {
     console.error('=== RECORDING START ERROR ===');
     console.error('Error:', error);
@@ -187,89 +177,71 @@ export default function CameraScreen() {
     recordingPromise.current = null;
   }
 };
+
 const handleStopRecording = async () => {
-  console.log('=== STOP RECORDING (DIAGNOSTICS) ===');
+  console.log('=== STOP RECORDING (NEW APPROACH) ===');
   
   if (!cameraRef.current || !isRecording || !recordingPromise.current) {
     console.log('Cannot stop recording');
     return;
   }
 
-  // 1. Сначала проверим файлы в кэше ДО остановки записи
   try {
-    // @ts-ignore - временно игнорируем ошибку TypeScript
-    const cacheDir = FileSystem.cacheDirectory || FileSystem.cacheDir || FileSystem.documentDirectory;
-    if (cacheDir) {
-      const files = await FileSystem.readDirectoryAsync(cacheDir);
-      const videoFiles = files.filter((f: string) => f.endsWith('.mp4') || f.endsWith('.mov'));
-      console.log('Видео файлы в кэше ДО остановки:', videoFiles);
-    }
-  } catch (err) {
-    console.log('Ошибка чтения кэша:', err);
-  }
-
-  console.log('Calling stopRecording()...');
-  
-  try {
-    // 2. Останавливаем запись
+    // 1. Останавливаем запись
     cameraRef.current.stopRecording();
     console.log('stopRecording() called');
     
-    // 3. Ждём результат promise с таймаутом
-    console.log('Waiting for recording promise to resolve...');
+    // 2. Ждём промис с коротким таймаутом (1 секунда)
+    console.log('Waiting for recording promise...');
     
-    // Добавляем таймаут, чтобы promise не "зависал" вечно
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Таймаут ожидания видео (Promise не разрешился за 5 сек)')), 5000);
-    });
+    const video = await Promise.race([
+      recordingPromise.current,
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Таймаут 1 сек')), 1000)
+      )
+    ]);
     
-    const video = await Promise.race([recordingPromise.current, timeoutPromise]);
-    console.log('Recording promise RESOLVED!', { uri: video?.uri });
+    console.log('✅ Video received:', video);
+    console.log('URI:', video?.uri);
     
-    if (video && video.uri) {
-      console.log('Video URI received:', video.uri);
+    if (video?.uri) {
+      const newVideo: Video = {
+        id: Date.now().toString(),
+        uri: video.uri,
+        timestamp: Date.now(),
+      };
       
-      // 4. Проверим, существует ли файл по этому URI
-      const fileInfo = await FileSystem.getInfoAsync(video.uri);
-      console.log('Файл существует?', fileInfo.exists);
-      
-      // @ts-ignore - временно игнорируем ошибку TypeScript
-      if (fileInfo.exists && fileInfo.size) {
-        // @ts-ignore
-        console.log('Размер файла:', fileInfo.size);
-      }
-      
-      if (fileInfo.exists) {
-        const newVideo: Video = {
-          id: Date.now().toString(),
-          uri: video.uri,
-          timestamp: Date.now(),
-        };
-        
-        console.log('Adding video to inspection:', inspectionId);
-        addVideo(inspectionId as string, newVideo);
-        console.log('Video added successfully');
-      } else {
-        console.error('Файл по URI не существует!');
-      }
-    } else {
-      console.error('Video object is missing or has no URI:', video);
+      console.log('Adding video to inspection');
+      addVideo(inspectionId as string, newVideo);
+      console.log('✅ Video added successfully');
     }
   } catch (error) {
-    console.error('=== RECORDING STOP ERROR ===');
-    console.error('Error:', error);
+    console.error('=== RECORDING STOP ERROR (NEW) ===');
+    console.error('Error message:', (error as Error).message || String(error));
     
-    // 5. После ошибки проверим кэш снова
+    // 3. Проверяем, есть ли видео файлы в разных директориях
     try {
-      // @ts-ignore - временно игнорируем ошибку TypeScript
-      const cacheDir = FileSystem.cacheDirectory || FileSystem.cacheDir || FileSystem.documentDirectory;
-      if (cacheDir) {
-        const files = await FileSystem.readDirectoryAsync(cacheDir);
-        const videoFiles = files.filter((f: string) => f.endsWith('.mp4') || f.endsWith('.mov'));
-        console.log('Видео файлы в кэше ПОСЛЕ ошибки:', videoFiles);
+      console.log('=== CHECKING FOR VIDEO FILES ===');
+      
+      // Проверяем временную директорию
+      // @ts-ignore
+      const tempDir = FileSystem.cacheDirectory || FileSystem.cacheDir;
+      if (tempDir) {
+        const files = await FileSystem.readDirectoryAsync(tempDir);
+        const videoFiles = files.filter((f: string) => f.includes('.mp4') || f.includes('.mov'));
+        console.log('Video files in temp dir:', videoFiles);
       }
-    } catch (err) {
-      console.log('Ошибка проверки кэша после ошибки:', err);
+      
+      // Проверяем документы
+      // @ts-ignore
+      const docDir = FileSystem.documentDirectory;
+      if (docDir) {
+        const files = await FileSystem.readDirectoryAsync(docDir);
+        const videoFiles = files.filter((f: string) => f.includes('.mp4') || f.includes('.mov'));
+        console.log('Video files in documents:', videoFiles);
+      }
+    } catch (fsError) {
+      console.log('File system check error:', fsError);
     }
   } finally {
     console.log('Cleaning up recording state');
