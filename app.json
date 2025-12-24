@@ -53,6 +53,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "expo-video",
       [
         "expo-router",
         {
@@ -74,12 +75,13 @@
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true
     },
-     "runtimeVersion": "1.0.0", 
+    "runtimeVersion": "1.0.0",
     "updates": {
       "url": "https://u.expo.dev/efa226ce-9ff8-46ac-a263-80c57d96ac0e"
     }

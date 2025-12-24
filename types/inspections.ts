@@ -6,9 +6,15 @@ export interface Photo {
 
 export interface Video {
   id: string;
-  uri: string;
+  uri: string;           // Приватный URI в хранилище приложения
   timestamp: number;
   duration?: number;
+  filename?: string;
+  fileSize?: number;     // Размер файла в байтах
+  originalUri?: string;  // Оригинальный URI (для отладки)
+  uploadedToYandex?: boolean; // Флаг загрузки на Яндекс.Диск
+  yandexPath?: string;   // Путь на Яндекс.Диске
+
 }
 
 export type Media = Photo | Video;
