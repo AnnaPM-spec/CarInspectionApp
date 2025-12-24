@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { CameraView, CameraType, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { X, Camera, Images, FlipHorizontal, Video as VideoIcon } from 'lucide-react-native';
@@ -167,12 +168,10 @@ export default function CameraScreen() {
   console.log('Recording start time set:', recordingStartTime.current);
 
   try {
-    const recordOptions = Platform.OS === 'ios' ? {
-      maxDuration: 60,
-    } : {
-      maxDuration: 60,
-      maxFileSize: 100 * 1024 * 1024,
-    };
+  const recordOptions = {
+  maxDuration: 10, // Сначала протестируйте с очень короткой записью (10 сек)
+  // Уберите maxFileSize для теста
+};
     
     // ЗАПУСКАЕМ запись, но НЕ ждём сразу
     recordingPromise.current = cameraRef.current.recordAsync(recordOptions);
@@ -188,43 +187,90 @@ export default function CameraScreen() {
     recordingPromise.current = null;
   }
 };
-  const handleStopRecording = async () => {
-  console.log('=== STOP RECORDING (CORRECTED) ===');
+const handleStopRecording = async () => {
+  console.log('=== STOP RECORDING (DIAGNOSTICS) ===');
   
   if (!cameraRef.current || !isRecording || !recordingPromise.current) {
     console.log('Cannot stop recording');
     return;
   }
 
+  // 1. Сначала проверим файлы в кэше ДО остановки записи
+  try {
+    // @ts-ignore - временно игнорируем ошибку TypeScript
+    const cacheDir = FileSystem.cacheDirectory || FileSystem.cacheDir || FileSystem.documentDirectory;
+    if (cacheDir) {
+      const files = await FileSystem.readDirectoryAsync(cacheDir);
+      const videoFiles = files.filter((f: string) => f.endsWith('.mp4') || f.endsWith('.mov'));
+      console.log('Видео файлы в кэше ДО остановки:', videoFiles);
+    }
+  } catch (err) {
+    console.log('Ошибка чтения кэша:', err);
+  }
+
   console.log('Calling stopRecording()...');
   
   try {
-    // 1. Останавливаем запись
+    // 2. Останавливаем запись
     cameraRef.current.stopRecording();
     console.log('stopRecording() called');
     
-    // 2. Ждём результат promise (который создали в handleStartRecording)
+    // 3. Ждём результат promise с таймаутом
     console.log('Waiting for recording promise to resolve...');
-    const video = await recordingPromise.current;
-    console.log('Recording promise RESOLVED!');
+    
+    // Добавляем таймаут, чтобы promise не "зависал" вечно
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Таймаут ожидания видео (Promise не разрешился за 5 сек)')), 5000);
+    });
+    
+    const video = await Promise.race([recordingPromise.current, timeoutPromise]);
+    console.log('Recording promise RESOLVED!', { uri: video?.uri });
     
     if (video && video.uri) {
       console.log('Video URI received:', video.uri);
-      const newVideo: Video = {
-        id: Date.now().toString(),
-        uri: video.uri,
-        timestamp: Date.now(),
-      };
       
-      console.log('Adding video to inspection:', inspectionId);
-      addVideo(inspectionId as string, newVideo);
-      console.log('Video added successfully');
+      // 4. Проверим, существует ли файл по этому URI
+      const fileInfo = await FileSystem.getInfoAsync(video.uri);
+      console.log('Файл существует?', fileInfo.exists);
+      
+      // @ts-ignore - временно игнорируем ошибку TypeScript
+      if (fileInfo.exists && fileInfo.size) {
+        // @ts-ignore
+        console.log('Размер файла:', fileInfo.size);
+      }
+      
+      if (fileInfo.exists) {
+        const newVideo: Video = {
+          id: Date.now().toString(),
+          uri: video.uri,
+          timestamp: Date.now(),
+        };
+        
+        console.log('Adding video to inspection:', inspectionId);
+        addVideo(inspectionId as string, newVideo);
+        console.log('Video added successfully');
+      } else {
+        console.error('Файл по URI не существует!');
+      }
     } else {
-      console.error('Video object is missing URI:', video);
+      console.error('Video object is missing or has no URI:', video);
     }
   } catch (error) {
     console.error('=== RECORDING STOP ERROR ===');
     console.error('Error:', error);
+    
+    // 5. После ошибки проверим кэш снова
+    try {
+      // @ts-ignore - временно игнорируем ошибку TypeScript
+      const cacheDir = FileSystem.cacheDirectory || FileSystem.cacheDir || FileSystem.documentDirectory;
+      if (cacheDir) {
+        const files = await FileSystem.readDirectoryAsync(cacheDir);
+        const videoFiles = files.filter((f: string) => f.endsWith('.mp4') || f.endsWith('.mov'));
+        console.log('Видео файлы в кэше ПОСЛЕ ошибки:', videoFiles);
+      }
+    } catch (err) {
+      console.log('Ошибка проверки кэша после ошибки:', err);
+    }
   } finally {
     console.log('Cleaning up recording state');
     setIsRecording(false);
