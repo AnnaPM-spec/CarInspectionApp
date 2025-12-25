@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { ExternalLink, LogOut, HardDrive } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Добавлен useEffect в импорт!
 import {
   View,
   Text,
@@ -11,27 +12,108 @@ import {
   Linking,
   ActivityIndicator,
 } from 'react-native';
-import * as Crypto from 'expo-crypto';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
 
-
 WebBrowser.maybeCompleteAuthSession();
 
-const YANDEX_CLIENT_ID = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
+// Настройка discovery для Яндекс OAuth
+const discovery = {
+  authorizationEndpoint: 'https://oauth.yandex.ru/authorize',
+  // Для Implicit Flow tokenEndpoint не требуется
+};
 
 export default function AuthScreen() {
   const router = useRouter();
   const { yandexAuth, saveYandexAuth, clearYandexAuth } = useInspections();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
+  // Получаем clientId из переменных окружения
+  const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
+  // Генерируем redirectUri для Android приложения
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'app.rork.carinspectionapp',
+    path: 'callback',
+  });
 
+  // Создаем запрос авторизации с использованием хука useAuthRequest
+  const [request, response, promptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: clientId || '',
+      redirectUri,
+      scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
+      responseType: AuthSession.ResponseType.Token,
+      extraParams: {
+        force_confirm: 'true', // Для тестирования - всегда показывать окно подтверждения
+      },
+    },
+    discovery
+  );
+
+  // === ДОБАВЬТЕ ЭТОТ useEffect ПРЯМО ЗДЕСЬ ===
+  // Обработка ответа от Яндекс OAuth
+  useEffect(() => {
+    console.log('=== Auth Response ===');
+    console.log('Response type:', response?.type);
+    console.log('Full response:', JSON.stringify(response, null, 2));
+
+    if (!response) return;
+
+    // Обработка успешной авторизации
+    if (response.type === 'success') {
+      // Безопасное извлечение параметров
+      const params = 'params' in response ? response.params : null;
+      
+      if (params && params.access_token) {
+        console.log('Access token received');
+        
+        const expiresAt = Date.now() + (parseInt(params.expires_in || '31536000', 10) * 1000);
+        
+        saveYandexAuth({
+          accessToken: params.access_token,
+          expiresAt,
+        }).then(() => {
+          console.log('Token saved successfully');
+          Alert.alert('Успешно', 'Яндекс Диск подключен');
+          router.back();
+        }).catch((error) => {
+          console.error('Failed to save token:', error);
+          Alert.alert('Ошибка', 'Не удалось сохранить токен доступа');
+        });
+      } else {
+        console.error('No access token in response params');
+        Alert.alert('Ошибка', 'Не удалось получить токен доступа');
+        setIsAuthenticating(false);
+      }
+    }
+    // Обработка ошибки
+    else if (response.type === 'error') {
+      const error = 'error' in response ? response.error : null;
+      console.error('Auth error:', error);
+      Alert.alert('Ошибка', `Авторизация не удалась: ${error?.message || 'Неизвестная ошибка'}`);
+      setIsAuthenticating(false);
+    }
+    // Обработка отмены пользователем
+    else if (response.type === 'cancel' || response.type === 'dismiss') {
+      console.log(`Auth ${response.type} by user`);
+      setIsAuthenticating(false);
+    }
+    // Обработка других состояний
+    else if (response.type === 'locked') {
+      console.log('Auth browser locked');
+      Alert.alert('Ошибка', 'Браузер заблокирован или недоступен');
+      setIsAuthenticating(false);
+    }
+  }, [response, saveYandexAuth, router]);
+  // === КОНЕЦ useEffect ===
+
+  // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
-    if (!YANDEX_CLIENT_ID) {
+    if (!clientId) {
       Alert.alert(
         'Ошибка конфигурации',
-        'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали iOS App ID: app.rork.6aycdrbhipych60l9qhmv\n3. Указали Android Package Name: app.rork.6aycdrbhipych60l9qhmv\n4. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
+        'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали Android Package Name: app.rork.carinspectionapp\n3. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
         [
           { text: 'Открыть регистрацию', onPress: () => Linking.openURL('https://oauth.yandex.ru/client/new') },
           { text: 'Закрыть', style: 'cancel' }
@@ -42,62 +124,40 @@ export default function AuthScreen() {
 
     try {
       setIsAuthenticating(true);
-
-      const deviceId = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        Date.now().toString() + Math.random().toString()
-      );
-
-      const redirectUri = `yx${YANDEX_CLIENT_ID}://callback`;
-      const authUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${YANDEX_CLIENT_ID}&device_id=${deviceId}&device_name=CarInspectionApp`;
-
-      console.log('=== Yandex Auth Debug (Implicit Flow) ===');
-      console.log('Client ID:', YANDEX_CLIENT_ID);
-      console.log('Device ID:', deviceId);
+      
+      // Выводим отладочную информацию
+      console.log('=== Yandex Auth Debug ===');
+      console.log('Client ID:', clientId);
+      console.log('Client ID length:', clientId?.length);
       console.log('Redirect URI:', redirectUri);
-      console.log('Auth URL:', authUrl);
+      console.log('Request ready:', !!request);
+      
+      // Проверяем, может ли система открыть нашу схему
+      const canOpen = await Linking.canOpenURL(redirectUri);
+      console.log('Can open our scheme:', canOpen);
 
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
-
-      console.log('Auth result:', result);
-
-      if (result.type === 'success' && result.url) {
-        const url = result.url;
-        const hashParams = url.split('#')[1];
-        
-        if (hashParams) {
-          const params = new URLSearchParams(hashParams);
-          const accessToken = params.get('access_token');
-          const expiresIn = params.get('expires_in');
-
-          if (accessToken) {
-            const expiresAt = Date.now() + (parseInt(expiresIn || '31536000', 10) * 1000);
-            
-            await saveYandexAuth({
-              accessToken,
-              expiresAt,
-            });
-
-            Alert.alert('Успешно', 'Яндекс Диск подключен');
-            router.back();
-          } else {
-            Alert.alert('Ошибка', 'Не удалось получить токен доступа');
-          }
-        } else {
-          Alert.alert('Ошибка', 'Не удалось получить токен авторизации');
-        }
-      } else if (result.type === 'cancel') {
-        console.log('Auth cancelled by user');
+      if (!request) {
+        Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
+        setIsAuthenticating(false);
+        return;
       }
-    } catch (error) {
-      console.error('Auth error:', error);
-      Alert.alert('Ошибка', 'Не удалось выполнить авторизацию');
-    } finally {
+
+      // Запускаем процесс авторизации
+      const result = await promptAsync();
+      console.log('Prompt result:', result);
+      
+      // Если promptAsync завершился сразу (не ждем ответа через useEffect)
+      if (result.type === 'dismiss' || result.type === 'cancel') {
+        setIsAuthenticating(false);
+      }
+      
+    } catch (error: any) {
+      console.error('Auth initiation error:', error);
+      console.error('Error stack:', error.stack);
+      Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
       setIsAuthenticating(false);
     }
   };
-
-
 
   const handleDisconnect = () => {
     Alert.alert(
@@ -116,8 +176,6 @@ export default function AuthScreen() {
       ]
     );
   };
-
-
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -142,9 +200,7 @@ export default function AuthScreen() {
 
             <TouchableOpacity
               style={styles.instructionButton}
-              onPress={() =>
-                Linking.openURL('https://disk.yandex.ru/')
-              }
+              onPress={() => Linking.openURL('https://disk.yandex.ru/')}
             >
               <ExternalLink size={20} color="#007AFF" strokeWidth={2} />
               <Text style={styles.instructionButtonText}>
@@ -198,7 +254,7 @@ export default function AuthScreen() {
             <TouchableOpacity
               style={[styles.connectButton, isAuthenticating && styles.connectButtonDisabled]}
               onPress={handleConnect}
-              disabled={isAuthenticating}
+              disabled={isAuthenticating || !request}
             >
               {isAuthenticating ? (
                 <ActivityIndicator color="#FFF" />
