@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { InspectionProvider } from "../context/InspectionContext";
+
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,7 +31,9 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
+    WebBrowser.maybeCompleteAuthSession();
     SplashScreen.hideAsync();
+    console.log('RootLayout mounted - auth session ready'); //для отладки
   }, []);
 
   return (

@@ -15,8 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
 
-WebBrowser.maybeCompleteAuthSession();
-
 // Настройка discovery для Яндекс OAuth
 const discovery = {
   authorizationEndpoint: 'https://oauth.yandex.ru/authorize',
@@ -120,41 +118,59 @@ const redirectUri = 'app.rork.carinspectionapp://callback';
     }
 
     try {
-      setIsAuthenticating(true);
-      
-      // Выводим отладочную информацию
-      console.log('=== Yandex Auth Debug ===');
-      console.log('Client ID:', clientId);
-      console.log('Client ID length:', clientId?.length);
-      console.log('Redirect URI:', redirectUri);
-      console.log('Request ready:', !!request);
-      
-      // Проверяем, может ли система открыть нашу схему
-      const canOpen = await Linking.canOpenURL(redirectUri);
-      console.log('Can open our scheme:', canOpen);
+    setIsAuthenticating(true);
 
-      if (!request) {
-        Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
-        setIsAuthenticating(false);
-        return;
-      }
+    console.log('=== Yandex Auth Debug ===');
+    console.log('Client ID:', clientId?.substring(0, 8) + '...');
+    console.log('Redirect URI:', redirectUri);
+    console.log('Request ready:', !!request);
+    
+    // Тестируем разные варианты схемы
+    const testSchemes = [
+      'app.rork.carinspectionapp://callback',
+      'app.rork.carinspectionapp:///callback',
+      'app.rork.carinspectionapp://',
+    ];
+    
+    console.log('Testing schemes:');
+    for (const scheme of testSchemes) {
+      const canOpen = await Linking.canOpenURL(scheme);
+      console.log(`- ${scheme}: ${canOpen}`);
+    }
+    
+    const canOpen = await Linking.canOpenURL(redirectUri);
+    console.log('Can open our scheme?', canOpen);
 
-      // Запускаем процесс авторизации
-      const result = await promptAsync();
-      console.log('Prompt result:', result);
-      
-      // Если promptAsync завершился сразу (не ждем ответа через useEffect)
-      if (result.type === 'dismiss' || result.type === 'cancel') {
-        setIsAuthenticating(false);
-      }
-      
-    } catch (error: any) {
-      console.error('Auth initiation error:', error);
-      console.error('Error stack:', error.stack);
-      Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
+    if (!canOpen) {
+      Alert.alert(
+        'Ошибка схемы', 
+        `Схема ${redirectUri} не зарегистрирована.\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters`
+      );
+      setIsAuthenticating(false);
+      return;
+    }
+
+    if (!request) {
+      Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
+      setIsAuthenticating(false);
+      return;
+    }
+
+    // Запускаем процесс авторизации
+    const result = await promptAsync();
+    console.log('Prompt result type:', result.type);
+    
+    if (result.type === 'dismiss' || result.type === 'cancel') {
+      console.log(`Auth ${result.type} by user`);
       setIsAuthenticating(false);
     }
-  };
+    
+  } catch (error: any) {
+    console.error('Auth initiation error:', error);
+    Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
+    setIsAuthenticating(false);
+  }
+};
 
   const handleDisconnect = () => {
     Alert.alert(
