@@ -31,11 +31,8 @@ export default function AuthScreen() {
   // Получаем clientId из переменных окружения
   const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
-  // Генерируем redirectUri для Android приложения
-  const redirectUri = AuthSession.makeRedirectUri({
-    scheme: 'app.rork.carinspectionapp',
-    path: 'callback',
-  });
+  // Явно указываем redirectUri для Яндекс OAuth
+const redirectUri = 'app.rork.carinspectionapp://callback';
 
   // Создаем запрос авторизации с использованием хука useAuthRequest
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
