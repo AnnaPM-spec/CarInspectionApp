@@ -37,23 +37,24 @@ export default function AuthScreen() {
   // Получаем clientId из переменных окружения
   const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
-  // Явно указываем redirectUri для Яндекс OAuth
-  const redirectUri = 'app.rork.carinspectionapp:/callback';
-
   // Создаем запрос авторизации с использованием хука useAuthRequest
-  const [request, response, promptAsync] = AuthSession.useAuthRequest(
-    {
-      clientId: clientId || '',
-      redirectUri,
-      scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
-      responseType: AuthSession.ResponseType.Token,
-      extraParams: {
-        force_confirm: 'true',
-      },
+  const redirectUri = AuthSession.makeRedirectUri({
+  scheme: 'app.rork.carinspectionapp',
+  path: 'oauth-callback',
+});
+console.log('Generated redirectUri for Android:', redirectUri);
+const [request, response, promptAsync] = AuthSession.useAuthRequest(
+  {
+    clientId: clientId || '',
+    redirectUri, // Нужно указать, но makeRedirectUri создаст правильный
+    scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
+    responseType: AuthSession.ResponseType.Token,
+    extraParams: {
+      force_confirm: 'true',
     },
-    discovery
-  );
-
+  },
+  discovery
+);
   // Обработка ответа от Яндекс OAuth
   useEffect(() => {
     if (!response) return;
@@ -101,53 +102,44 @@ export default function AuthScreen() {
 
   // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
-  console.log('=== handleConnect ВЫЗВАН ===');
+  console.log('=== Android Intent Auth ===');
   
-  // Шаг 1: Проверяем, что функция вызывается
-  Alert.alert('Шаг 1', 'Функция handleConnect вызвана!', [
-    {
-      text: 'Далее',
-      onPress: async () => {
-        // Шаг 2: Проверяем clientId
-        Alert.alert('Шаг 2', `Client ID: ${clientId ? '✅ Есть' : '❌ Нет'}\n${clientId?.substring(0, 8) || 'НЕТ'}...`, [
-          {
-            text: 'Проверить схему',
-            onPress: async () => {
-              // Шаг 3: Проверяем схему
-              const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://callback');
-              Alert.alert('Шаг 3', `Схема работает: ${canOpen ? '✅ ДА' : '❌ НЕТ'}`, [
-                {
-                  text: 'Проверить request',
-                  onPress: () => {
-                    // Шаг 4: Проверяем request
-                    Alert.alert('Шаг 4', `Request готов: ${request ? '✅ ДА' : '❌ НЕТ'}`, [
-                      {
-                        text: 'Запустить авторизацию',
-                        onPress: async () => {
-                          if (!request) {
-                            Alert.alert('Ошибка', 'Request не готов');
-                            return;
-                          }
-                          
-                          try {
-                            const result = await promptAsync();
-                            Alert.alert('Результат', `Тип: ${result.type}`);
-                          } catch (error) {
-                            const errorMessage = error instanceof Error ? error.message : String(error);
-                            Alert.alert('Ошибка', `Ошибка promptAsync: ${errorMessage}`);
-                          }
-                        }
-                      }
-                    ]);
-                  }
-                }
-              ]);
-            }
-          }
-        ]);
-      }
-    }
-  ]);
+  if (!clientId) {
+    Alert.alert('Ошибка', 'Client ID не настроен');
+    return;
+  }
+  
+  if (!request) {
+    Alert.alert('Инфо', 'Запрос готовится... Попробуйте через 2 секунды');
+    return;
+  }
+  
+  // Проверяем схему (уже знаем, что работает)
+  const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://');
+  if (!canOpen) {
+    Alert.alert('Ошибка', 'Схема не зарегистрирована. Переустановите приложение.');
+    return;
+  }
+  
+  Alert.alert('Запуск', 'Открывается Яндекс OAuth через Android Intent...');
+  
+  try {
+    setIsAuthenticating(true);
+    
+    // Выводим отладочную информацию
+    console.log('Redirect URI для Android:', redirectUri);
+    console.log('Request ready:', !!request);
+    
+    const result = await promptAsync();
+    console.log('Intent result:', result.type);
+    
+    // Результат обработается в useEffect
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('Intent auth error:', errorMessage);
+    Alert.alert('Ошибка', `Ошибка авторизации: ${errorMessage}`);
+    setIsAuthenticating(false);
+  }
 };
 
   const handleDisconnect = () => {
