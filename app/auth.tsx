@@ -101,101 +101,53 @@ export default function AuthScreen() {
 
   // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
-  if (!clientId) {
-    Alert.alert(
-      'Ошибка конфигурации',
-      'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали Android Package Name: app.rork.carinspectionapp\n3. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
-      [
-        { text: 'Открыть регистрацию', onPress: () => Linking.openURL('https://oauth.yandex.ru/client/new') },
-        { text: 'Закрыть', style: 'cancel' }
-      ]
-    );
-    return;
-  }
-
-  try {
-    setIsAuthenticating(true);
-
-    // === ПОШАГОВАЯ ОТЛАДКА С ALERT ===
-    
-    // Шаг 1: Проверяем clientId
-    Alert.alert('Шаг 1/5', `Client ID: ${clientId?.substring(0, 8)}...\nНажмите OK для проверки схемы`);
-    
-    // Шаг 2: Проверяем схему
-    const testSchemes = [
-      'app.rork.carinspectionapp://callback',
-      'app.rork.carinspectionapp:///callback',
-      'app.rork.carinspectionapp://',
-    ];
-    
-    let schemeWorks = false;
-    let workingScheme = '';
-    
-    for (const scheme of testSchemes) {
-      const canOpen = await Linking.canOpenURL(scheme);
-      console.log(`Схема ${scheme}: ${canOpen ? '✓' : '✗'}`);
-      if (canOpen) {
-        schemeWorks = true;
-        workingScheme = scheme;
-        break;
+  console.log('=== handleConnect ВЫЗВАН ===');
+  
+  // Шаг 1: Проверяем, что функция вызывается
+  Alert.alert('Шаг 1', 'Функция handleConnect вызвана!', [
+    {
+      text: 'Далее',
+      onPress: async () => {
+        // Шаг 2: Проверяем clientId
+        Alert.alert('Шаг 2', `Client ID: ${clientId ? '✅ Есть' : '❌ Нет'}\n${clientId?.substring(0, 8) || 'НЕТ'}...`, [
+          {
+            text: 'Проверить схему',
+            onPress: async () => {
+              // Шаг 3: Проверяем схему
+              const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://callback');
+              Alert.alert('Шаг 3', `Схема работает: ${canOpen ? '✅ ДА' : '❌ НЕТ'}`, [
+                {
+                  text: 'Проверить request',
+                  onPress: () => {
+                    // Шаг 4: Проверяем request
+                    Alert.alert('Шаг 4', `Request готов: ${request ? '✅ ДА' : '❌ НЕТ'}`, [
+                      {
+                        text: 'Запустить авторизацию',
+                        onPress: async () => {
+                          if (!request) {
+                            Alert.alert('Ошибка', 'Request не готов');
+                            return;
+                          }
+                          
+                          try {
+                            const result = await promptAsync();
+                            Alert.alert('Результат', `Тип: ${result.type}`);
+                          } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            Alert.alert('Ошибка', `Ошибка promptAsync: ${errorMessage}`);
+                          }
+                        }
+                      }
+                    ]);
+                  }
+                }
+              ]);
+            }
+          }
+        ]);
       }
     }
-    
-    Alert.alert(
-      'Шаг 2/5', 
-      `Проверка схемы:\n${testSchemes.map(s => `${s}: ${schemeWorks && s === workingScheme ? '✓' : '✗'}`).join('\n')}\n\nРабочая схема: ${workingScheme || 'НЕТ'}\n\nНажмите OK для продолжения`
-    );
-    
-    if (!schemeWorks) {
-      Alert.alert(
-        'Ошибка схемы', 
-        `Ни одна схема не работает!\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters\n\nЗатем переустановите приложение.`
-      );
-      setIsAuthenticating(false);
-      return;
-    }
-
-    // Шаг 3: Проверяем request
-    if (!request) {
-      Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
-      setIsAuthenticating(false);
-      return;
-    }
-
-    Alert.alert('Шаг 3/5', `Запрос готов: ${!!request}\nНажмите OK для открытия авторизации Яндекс`);
-    
-    // Шаг 4: Создаём тестовый URL для проверки
-    const testUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${encodeURIComponent(workingScheme || redirectUri)}&force_confirm=true`;
-    console.log('Тестовый URL для Яндекс:', testUrl);
-    
-    Alert.alert(
-      'Шаг 4/5', 
-      `Параметры запроса:\n- Client ID: ${clientId?.substring(0, 8)}...\n- Redirect: ${workingScheme || redirectUri}\n\nНажмите OK для запуска авторизации`
-    );
-    
-    // Шаг 5: Запускаем авторизацию
-    Alert.alert('Шаг 5/5', 'Открывается браузер Яндекс...');
-    
-    const result = await promptAsync();
-    
-    Alert.alert(
-      'Результат авторизации', 
-      `Тип результата: ${result.type}\n${result.type === 'success' ? '✅ Успешно!' : '❌ Ошибка'}`
-    );
-    
-    if (result.type === 'dismiss' || result.type === 'cancel') {
-      console.log(`Auth ${result.type} by user`);
-      setIsAuthenticating(false);
-    }
-    
-  } catch (error: any) {
-    console.error('Auth initiation error:', error);
-    Alert.alert(
-      'Критическая ошибка', 
-      `Не удалось начать авторизацию:\n\n${error.message || 'Неизвестная ошибка'}\n\nStack: ${error.stack?.substring(0, 100)}...`
-    );
-    setIsAuthenticating(false);
-  }
+  ]);
 };
 
   const handleDisconnect = () => {
@@ -301,7 +253,18 @@ export default function AuthScreen() {
                 <Text style={styles.connectButtonText}>Подключить Яндекс Диск</Text>
               )}
             </TouchableOpacity>
-            
+            <TouchableOpacity
+              style={[styles.connectButton, {backgroundColor: '#34C759', marginTop: 10}]}
+              onPress={async () => {
+              const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://callback');
+              Alert.alert(
+              'Быстрый тест схемы',
+              `Схема app.rork.carinspectionapp://callback\n\nРаботает: ${canOpen ? '✅ ДА' : '❌ НЕТ'}\n\nЕсли НЕТ - проверьте:\n1. app.json - scheme\n2. Переустановите приложение`
+          );
+        }}
+      >
+        <Text style={styles.connectButtonText}>🔍 Быстрый тест схемы</Text>
+      </TouchableOpacity>
             <Text style={styles.instructionText}>
               После нажатия откроется браузер для авторизации в Яндексе
             </Text>
@@ -316,7 +279,7 @@ export default function AuthScreen() {
           </>
         )}
       </View>
-
+            
       {/* === БЛОК С ЛОГАМИ ДЛЯ ОТЛАДКИ === */}
       {__DEV__ && debugLogs.length > 0 && (
         <View style={styles.debugContainer}>
