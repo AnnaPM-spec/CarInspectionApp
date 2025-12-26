@@ -101,75 +101,102 @@ export default function AuthScreen() {
 
   // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
-    if (!clientId) {
+  if (!clientId) {
+    Alert.alert(
+      'Ошибка конфигурации',
+      'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали Android Package Name: app.rork.carinspectionapp\n3. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
+      [
+        { text: 'Открыть регистрацию', onPress: () => Linking.openURL('https://oauth.yandex.ru/client/new') },
+        { text: 'Закрыть', style: 'cancel' }
+      ]
+    );
+    return;
+  }
+
+  try {
+    setIsAuthenticating(true);
+
+    // === ПОШАГОВАЯ ОТЛАДКА С ALERT ===
+    
+    // Шаг 1: Проверяем clientId
+    Alert.alert('Шаг 1/5', `Client ID: ${clientId?.substring(0, 8)}...\nНажмите OK для проверки схемы`);
+    
+    // Шаг 2: Проверяем схему
+    const testSchemes = [
+      'app.rork.carinspectionapp://callback',
+      'app.rork.carinspectionapp:///callback',
+      'app.rork.carinspectionapp://',
+    ];
+    
+    let schemeWorks = false;
+    let workingScheme = '';
+    
+    for (const scheme of testSchemes) {
+      const canOpen = await Linking.canOpenURL(scheme);
+      console.log(`Схема ${scheme}: ${canOpen ? '✓' : '✗'}`);
+      if (canOpen) {
+        schemeWorks = true;
+        workingScheme = scheme;
+        break;
+      }
+    }
+    
+    Alert.alert(
+      'Шаг 2/5', 
+      `Проверка схемы:\n${testSchemes.map(s => `${s}: ${schemeWorks && s === workingScheme ? '✓' : '✗'}`).join('\n')}\n\nРабочая схема: ${workingScheme || 'НЕТ'}\n\nНажмите OK для продолжения`
+    );
+    
+    if (!schemeWorks) {
       Alert.alert(
-        'Ошибка конфигурации',
-        'Client ID не настроен. Убедитесь, что вы:\n\n1. Создали приложение "Для авторизации" на https://oauth.yandex.ru/client/new\n2. Указали Android Package Name: app.rork.carinspectionapp\n3. Установили переменную EXPO_PUBLIC_YANDEX_CLIENT_ID',
-        [
-          { text: 'Открыть регистрацию', onPress: () => Linking.openURL('https://oauth.yandex.ru/client/new') },
-          { text: 'Закрыть', style: 'cancel' }
-        ]
+        'Ошибка схемы', 
+        `Ни одна схема не работает!\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters\n\nЗатем переустановите приложение.`
       );
+      setIsAuthenticating(false);
       return;
     }
 
-    try {
-      setIsAuthenticating(true);
-      addDebugLog('Начинаем авторизацию...');
+    // Шаг 3: Проверяем request
+    if (!request) {
+      Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
+      setIsAuthenticating(false);
+      return;
+    }
 
-      // Выводим отладочную информацию
-      addDebugLog(`Client ID: ${clientId?.substring(0, 8)}...`);
-      addDebugLog(`Redirect URI: ${redirectUri}`);
-      addDebugLog(`Request ready: ${!!request}`);
-      
-      // Тестируем разные варианты схемы
-      const testSchemes = [
-        'app.rork.carinspectionapp://callback',
-        'app.rork.carinspectionapp:///callback',
-        'app.rork.carinspectionapp://',
-      ];
-      
-      addDebugLog('Тестируем схемы:');
-      for (const scheme of testSchemes) {
-        const canOpenTest = await Linking.canOpenURL(scheme);
-        addDebugLog(`${scheme}: ${canOpenTest ? '✓' : '✗'}`);
-      }
-      
-      // Проверяем основную схему
-      const canOpen = await Linking.canOpenURL(redirectUri);
-      addDebugLog(`Основная схема: ${canOpen ? '✓ РАБОТАЕТ' : '✗ НЕ РАБОТАЕТ'}`);
-
-      if (!canOpen) {
-        Alert.alert(
-          'Ошибка схемы', 
-          `Схема ${redirectUri} не зарегистрирована.\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters`
-        );
-        setIsAuthenticating(false);
-        return;
-      }
-
-      if (!request) {
-        Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
-        setIsAuthenticating(false);
-        return;
-      }
-
-      // Запускаем процесс авторизации
-      addDebugLog('Запускаем процесс авторизации...');
-      const result = await promptAsync();
-      addDebugLog(`Результат prompt: ${result.type}`);
-      
-      if (result.type === 'dismiss' || result.type === 'cancel') {
-        addDebugLog(`Авторизация ${result.type} пользователем`);
-        setIsAuthenticating(false);
-      }
-      
-    } catch (error: any) {
-      addDebugLog(`Ошибка: ${error.message}`);
-      Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
+    Alert.alert('Шаг 3/5', `Запрос готов: ${!!request}\nНажмите OK для открытия авторизации Яндекс`);
+    
+    // Шаг 4: Создаём тестовый URL для проверки
+    const testUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${encodeURIComponent(workingScheme || redirectUri)}&force_confirm=true`;
+    console.log('Тестовый URL для Яндекс:', testUrl);
+    
+    Alert.alert(
+      'Шаг 4/5', 
+      `Параметры запроса:\n- Client ID: ${clientId?.substring(0, 8)}...\n- Redirect: ${workingScheme || redirectUri}\n\nНажмите OK для запуска авторизации`
+    );
+    
+    // Шаг 5: Запускаем авторизацию
+    Alert.alert('Шаг 5/5', 'Открывается браузер Яндекс...');
+    
+    const result = await promptAsync();
+    
+    Alert.alert(
+      'Результат авторизации', 
+      `Тип результата: ${result.type}\n${result.type === 'success' ? '✅ Успешно!' : '❌ Ошибка'}`
+    );
+    
+    if (result.type === 'dismiss' || result.type === 'cancel') {
+      console.log(`Auth ${result.type} by user`);
       setIsAuthenticating(false);
     }
-  };
+    
+  } catch (error: any) {
+    console.error('Auth initiation error:', error);
+    Alert.alert(
+      'Критическая ошибка', 
+      `Не удалось начать авторизацию:\n\n${error.message || 'Неизвестная ошибка'}\n\nStack: ${error.stack?.substring(0, 100)}...`
+    );
+    setIsAuthenticating(false);
+  }
+};
 
   const handleDisconnect = () => {
     Alert.alert(
