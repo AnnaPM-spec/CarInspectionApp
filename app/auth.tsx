@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import { ExternalLink, LogOut, HardDrive } from 'lucide-react-native';
-import React, { useState, useEffect } from 'react'; // Добавлен useEffect в импорт!
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,19 +18,27 @@ import { useInspections } from '../context/InspectionContext';
 // Настройка discovery для Яндекс OAuth
 const discovery = {
   authorizationEndpoint: 'https://oauth.yandex.ru/authorize',
-  // Для Implicit Flow tokenEndpoint не требуется
 };
 
 export default function AuthScreen() {
   const router = useRouter();
   const { yandexAuth, saveYandexAuth, clearYandexAuth } = useInspections();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+
+  // Функция для добавления логов
+  const addDebugLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const log = `${timestamp}: ${message}`;
+    console.log(log);
+    setDebugLogs(prev => [...prev.slice(-9), log]); // Храним последние 10 логов
+  };
 
   // Получаем clientId из переменных окружения
   const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
   // Явно указываем redirectUri для Яндекс OAuth
-const redirectUri = 'app.rork.carinspectionapp://callback';
+  const redirectUri = 'app.rork.carinspectionapp://callback';
 
   // Создаем запрос авторизации с использованием хука useAuthRequest
   const [request, response, promptAsync] = AuthSession.useAuthRequest(
@@ -40,28 +48,23 @@ const redirectUri = 'app.rork.carinspectionapp://callback';
       scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
       responseType: AuthSession.ResponseType.Token,
       extraParams: {
-        force_confirm: 'true', // Для тестирования - всегда показывать окно подтверждения
+        force_confirm: 'true',
       },
     },
     discovery
   );
 
-  // === ДОБАВЬТЕ ЭТОТ useEffect ПРЯМО ЗДЕСЬ ===
   // Обработка ответа от Яндекс OAuth
   useEffect(() => {
-    console.log('=== Auth Response ===');
-    console.log('Response type:', response?.type);
-    console.log('Full response:', JSON.stringify(response, null, 2));
-
     if (!response) return;
 
-    // Обработка успешной авторизации
+    addDebugLog(`Ответ от Яндекса: ${response.type}`);
+
     if (response.type === 'success') {
-      // Безопасное извлечение параметров
       const params = 'params' in response ? response.params : null;
       
       if (params && params.access_token) {
-        console.log('Access token received');
+        addDebugLog('Получен access token');
         
         const expiresAt = Date.now() + (parseInt(params.expires_in || '31536000', 10) * 1000);
         
@@ -69,39 +72,32 @@ const redirectUri = 'app.rork.carinspectionapp://callback';
           accessToken: params.access_token,
           expiresAt,
         }).then(() => {
-          console.log('Token saved successfully');
+          addDebugLog('Токен сохранён успешно');
           Alert.alert('Успешно', 'Яндекс Диск подключен');
           router.back();
         }).catch((error) => {
-          console.error('Failed to save token:', error);
+          addDebugLog(`Ошибка сохранения токена: ${error.message}`);
           Alert.alert('Ошибка', 'Не удалось сохранить токен доступа');
         });
       } else {
-        console.error('No access token in response params');
+        addDebugLog('Нет access token в ответе');
         Alert.alert('Ошибка', 'Не удалось получить токен доступа');
         setIsAuthenticating(false);
       }
-    }
-    // Обработка ошибки
-    else if (response.type === 'error') {
+    } else if (response.type === 'error') {
       const error = 'error' in response ? response.error : null;
-      console.error('Auth error:', error);
+      addDebugLog(`Ошибка авторизации: ${error?.message || 'Неизвестная ошибка'}`);
       Alert.alert('Ошибка', `Авторизация не удалась: ${error?.message || 'Неизвестная ошибка'}`);
       setIsAuthenticating(false);
-    }
-    // Обработка отмены пользователем
-    else if (response.type === 'cancel' || response.type === 'dismiss') {
-      console.log(`Auth ${response.type} by user`);
+    } else if (response.type === 'cancel' || response.type === 'dismiss') {
+      addDebugLog(`Авторизация ${response.type} пользователем`);
       setIsAuthenticating(false);
-    }
-    // Обработка других состояний
-    else if (response.type === 'locked') {
-      console.log('Auth browser locked');
+    } else if (response.type === 'locked') {
+      addDebugLog('Браузер заблокирован');
       Alert.alert('Ошибка', 'Браузер заблокирован или недоступен');
       setIsAuthenticating(false);
     }
   }, [response, saveYandexAuth, router]);
-  // === КОНЕЦ useEffect ===
 
   // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
@@ -118,59 +114,62 @@ const redirectUri = 'app.rork.carinspectionapp://callback';
     }
 
     try {
-    setIsAuthenticating(true);
+      setIsAuthenticating(true);
+      addDebugLog('Начинаем авторизацию...');
 
-    console.log('=== Yandex Auth Debug ===');
-    console.log('Client ID:', clientId?.substring(0, 8) + '...');
-    console.log('Redirect URI:', redirectUri);
-    console.log('Request ready:', !!request);
-    
-    // Тестируем разные варианты схемы
-    const testSchemes = [
-      'app.rork.carinspectionapp://callback',
-      'app.rork.carinspectionapp:///callback',
-      'app.rork.carinspectionapp://',
-    ];
-    
-    console.log('Testing schemes:');
-    for (const scheme of testSchemes) {
-      const canOpen = await Linking.canOpenURL(scheme);
-      console.log(`- ${scheme}: ${canOpen}`);
-    }
-    
-    const canOpen = await Linking.canOpenURL(redirectUri);
-    console.log('Can open our scheme?', canOpen);
+      // Выводим отладочную информацию
+      addDebugLog(`Client ID: ${clientId?.substring(0, 8)}...`);
+      addDebugLog(`Redirect URI: ${redirectUri}`);
+      addDebugLog(`Request ready: ${!!request}`);
+      
+      // Тестируем разные варианты схемы
+      const testSchemes = [
+        'app.rork.carinspectionapp://callback',
+        'app.rork.carinspectionapp:///callback',
+        'app.rork.carinspectionapp://',
+      ];
+      
+      addDebugLog('Тестируем схемы:');
+      for (const scheme of testSchemes) {
+        const canOpenTest = await Linking.canOpenURL(scheme);
+        addDebugLog(`${scheme}: ${canOpenTest ? '✓' : '✗'}`);
+      }
+      
+      // Проверяем основную схему
+      const canOpen = await Linking.canOpenURL(redirectUri);
+      addDebugLog(`Основная схема: ${canOpen ? '✓ РАБОТАЕТ' : '✗ НЕ РАБОТАЕТ'}`);
 
-    if (!canOpen) {
-      Alert.alert(
-        'Ошибка схемы', 
-        `Схема ${redirectUri} не зарегистрирована.\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters`
-      );
+      if (!canOpen) {
+        Alert.alert(
+          'Ошибка схемы', 
+          `Схема ${redirectUri} не зарегистрирована.\nПроверьте app.json:\n1. scheme: "app.rork.carinspectionapp"\n2. android.intentFilters`
+        );
+        setIsAuthenticating(false);
+        return;
+      }
+
+      if (!request) {
+        Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
+        setIsAuthenticating(false);
+        return;
+      }
+
+      // Запускаем процесс авторизации
+      addDebugLog('Запускаем процесс авторизации...');
+      const result = await promptAsync();
+      addDebugLog(`Результат prompt: ${result.type}`);
+      
+      if (result.type === 'dismiss' || result.type === 'cancel') {
+        addDebugLog(`Авторизация ${result.type} пользователем`);
+        setIsAuthenticating(false);
+      }
+      
+    } catch (error: any) {
+      addDebugLog(`Ошибка: ${error.message}`);
+      Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
       setIsAuthenticating(false);
-      return;
     }
-
-    if (!request) {
-      Alert.alert('Ошибка', 'Запрос авторизации ещё не готов');
-      setIsAuthenticating(false);
-      return;
-    }
-
-    // Запускаем процесс авторизации
-    const result = await promptAsync();
-    console.log('Prompt result type:', result.type);
-    
-    if (result.type === 'dismiss' || result.type === 'cancel') {
-      console.log(`Auth ${result.type} by user`);
-      setIsAuthenticating(false);
-    }
-    
-  } catch (error: any) {
-    console.error('Auth initiation error:', error);
-    Alert.alert('Ошибка', `Не удалось начать авторизацию: ${error.message || 'Неизвестная ошибка'}`);
-    setIsAuthenticating(false);
-  }
-};
+  };
 
   const handleDisconnect = () => {
     Alert.alert(
@@ -290,6 +289,16 @@ const redirectUri = 'app.rork.carinspectionapp://callback';
           </>
         )}
       </View>
+
+      {/* === БЛОК С ЛОГАМИ ДЛЯ ОТЛАДКИ === */}
+      {__DEV__ && debugLogs.length > 0 && (
+        <View style={styles.debugContainer}>
+          <Text style={styles.debugTitle}>Логи отладки:</Text>
+          {debugLogs.slice(-5).map((log, index) => (
+            <Text key={index} style={styles.debugText}>{log}</Text>
+          ))}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -437,5 +446,24 @@ const styles = StyleSheet.create({
   helpButtonText: {
     fontSize: 15,
     color: '#8E8E93',
+  },
+  // === НОВЫЕ СТИЛИ ДЛЯ ЛОГОВ ===
+  debugContainer: {
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    margin: 10,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#ccc',
+  },
+  debugTitle: {
+    fontWeight: 'bold',
+    marginBottom: 5,
+    fontSize: 14,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#333',
+    fontFamily: 'monospace',
   },
 });
