@@ -41,7 +41,8 @@
           "action": "VIEW",
           "data": [
             {
-              "scheme": "app.rork.carinspectionapp"
+              "scheme": "app.rork.carinspectionapp",
+               "host": "oauth-callback"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

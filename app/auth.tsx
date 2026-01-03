@@ -38,8 +38,12 @@ export default function AuthScreen() {
 const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
 // Для Android Intent используем простую схему
-const redirectUri = 'app.rork.carinspectionapp://oauth-callback';
+const redirectUri = AuthSession.makeRedirectUri({
+  path: 'oauth-callback', // совпадает с intentFilters
+});
 console.log('Android Intent redirectUri:', redirectUri);
+console.log('=== OUR redirectUri ===:', redirectUri);
+console.log('Should be: app.rork.carinspectionapp://oauth-callback');
 
 // Создаем запрос авторизации
 const [request, response, promptAsync] = AuthSession.useAuthRequest(
