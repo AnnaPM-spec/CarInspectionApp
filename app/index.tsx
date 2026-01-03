@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { Plus, Car, Clock, ExternalLink, Settings } from 'lucide-react-native';
+import { Plus, Car, Clock, ExternalLink, Settings, Upload, CheckCircle2 } from 'lucide-react-native';
 import React from 'react';
 import {
   View,
@@ -84,23 +84,30 @@ export default function HomeScreen() {
       </View>
 
       {activeInspection && (
-        <TouchableOpacity
-          style={styles.activeCard}
-          onPress={() => router.push(`/inspection/${activeInspection.id}`)}
-        >
-          <View style={styles.activeHeader}>
-            <View style={styles.activeIndicator} />
-            <Text style={styles.activeLabel}>Активный осмотр</Text>
-          </View>
-          <Text style={styles.activeCarName}>
-            {activeInspection.carBrand || activeInspection.carModel}
-          </Text>
-          <Text style={styles.activePhotos}>
-            {activeInspection.photos.length} фото
-          </Text>
-        </TouchableOpacity>
-      )}
-
+          <TouchableOpacity
+            style={styles.activeCard}
+            onPress={() => router.push(`/inspection/${activeInspection.id}`)}
+          >
+            <View style={styles.activeHeader}>
+              <View style={styles.activeIndicator} />
+              <Text style={styles.activeLabel}>Активный осмотр</Text>
+            </View>
+            <Text style={styles.activeCarName}>
+              {activeInspection.carBrand || activeInspection.carModel}
+            </Text>
+            <View style={styles.activeDetails}>
+              <Text style={styles.activePhotos}>
+                {activeInspection.photos.length} фото, {activeInspection.videos.length} видео
+              </Text>
+              {activeInspection.status === 'uploading' && (
+                <View style={styles.activeUploadingBadge}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.activeUploadingText}>Загрузка...</Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {inspections
           .filter(i => i.status !== 'active')
@@ -115,30 +122,38 @@ export default function HomeScreen() {
                   {inspection.carBrand || inspection.carModel}
                 </Text>
                 {inspection.status === 'uploading' && (
-                  <ActivityIndicator size="small" color="#007AFF" />
-                )}
-                {inspection.status === 'completed' && (
-                  <ExternalLink size={18} color="#34C759" strokeWidth={2} />
-                )}
-              </View>
-              <View style={styles.cardDetails}>
-                <View style={styles.cardDetailItem}>
-                  <Clock size={14} color="#8E8E93" strokeWidth={2} />
-                  <Text style={styles.cardDetailText}>
-                    {new Date(inspection.startTime).toLocaleString('ru-RU', {
-                      day: '2-digit',
-                      month: 'short',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                </View>
-                <Text style={styles.cardPhotos}>
-                  {inspection.photos.length} фото
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          <View style={styles.statusBadgeUploading}>
+            <Upload size={14} color="#007AFF" />
+            <Text style={styles.statusBadgeTextUploading}>Загрузка...</Text>
+          </View>
+        )}
+        
+        {inspection.status === 'completed' && inspection.yandexDiskFolderUrl && (
+          <View style={styles.statusBadgeCompleted}>
+            <CheckCircle2 size={14} color="#34C759" />
+            <Text style={styles.statusBadgeTextCompleted}>Загружено</Text>
+          </View>
+        )}
+      </View>
+      
+      <View style={styles.cardDetails}>
+        <View style={styles.cardDetailItem}>
+          <Clock size={14} color="#8E8E93" strokeWidth={2} />
+          <Text style={styles.cardDetailText}>
+            {new Date(inspection.startTime).toLocaleString('ru-RU', {
+              day: '2-digit',
+              month: 'short',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+        </View>
+        <Text style={styles.cardPhotos}>
+          {inspection.photos.length} фото, {inspection.videos.length} видео
+        </Text>
+      </View>
+    </TouchableOpacity>
+  ))}
 
         {inspections.filter(i => i.status !== 'active').length === 0 && (
           <View style={styles.emptyList}>
@@ -353,4 +368,54 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#8E8E93',
   },
+  // Добавьте после существующих стилей:
+statusBadgeUploading: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#F0F8FF',
+  paddingHorizontal: 8,
+  paddingVertical: 4,
+  borderRadius: 12,
+  gap: 4,
+},
+statusBadgeTextUploading: {
+  fontSize: 12,
+  color: '#007AFF',
+  fontWeight: '500',
+},
+statusBadgeCompleted: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: '#F0FFF0',
+  paddingHorizontal: 8,
+  paddingVertical: 4,
+  borderRadius: 12,
+  gap: 4,
+},
+statusBadgeTextCompleted: {
+  fontSize: 12,
+  color: '#34C759',
+  fontWeight: '500',
+},
+activeDetails: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginTop: 4,
+},
+activeUploadingBadge: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  paddingHorizontal: 8,
+  paddingVertical: 4,
+  borderRadius: 12,
+  gap: 4,
+},
+activeUploadingText: {
+  fontSize: 12,
+  color: '#FFF',
+  fontWeight: '500',
+  marginLeft: 4,
+},
 });

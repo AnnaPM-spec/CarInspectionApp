@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState, useEffect, useCallback } from 'react';
-import { Inspection, Photo, Video, YandexDiskAuth } from '@/types/inspection';
+import { Inspection, Photo, Video, YandexDiskAuth } from '@/types/inspections';
 
 const INSPECTIONS_STORAGE_KEY = 'inspections';
 const YANDEX_AUTH_STORAGE_KEY = 'yandex_auth';
@@ -10,6 +10,7 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
   const [inspections, setInspections] = useState<Inspection[]>([]);
   const [yandexAuth, setYandexAuth] = useState<YandexDiskAuth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [uploadingInspections, setUploadingInspections] = useState<string[]>([]); // ← НОВОЕ
 
   useEffect(() => {
     loadData();
@@ -140,10 +141,27 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
     }
   }, []);
 
+  // НОВЫЕ ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ ЗАГРУЗКОЙ
+  const startUpload = useCallback((inspectionId: string) => {
+    if (!uploadingInspections.includes(inspectionId)) {
+      setUploadingInspections(prev => [...prev, inspectionId]);
+    }
+  }, [uploadingInspections]);
+
+  const finishUpload = useCallback((inspectionId: string) => {
+    setUploadingInspections(prev => prev.filter(id => id !== inspectionId));
+  }, []);
+
+  const cancelUpload = useCallback((inspectionId: string) => {
+    setUploadingInspections(prev => prev.filter(id => id !== inspectionId));
+    updateInspectionStatus(inspectionId, 'active');
+  }, [updateInspectionStatus]);
+
   return {
     inspections,
     yandexAuth,
     isLoading,
+    uploadingInspections, // ← НОВОЕ
     createInspection,
     addPhoto,
     addVideo,
@@ -152,5 +170,8 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
     deleteInspection,
     saveYandexAuth,
     clearYandexAuth,
+    startUpload,    // ← НОВОЕ
+    finishUpload,   // ← НОВОЕ
+    cancelUpload,   // ← НОВОЕ
   };
 });
