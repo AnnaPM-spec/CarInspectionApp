@@ -38,9 +38,7 @@ export default function AuthScreen() {
 const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
 // Для Android Intent используем простую схему
-const redirectUri = AuthSession.makeRedirectUri({
-  path: 'oauth-callback', // совпадает с intentFilters
-});
+const redirectUri = 'app.rork.carinspectionapp://oauth-callback';
 console.log('Android Intent redirectUri:', redirectUri);
 console.log('=== OUR redirectUri ===:', redirectUri);
 console.log('Should be: app.rork.carinspectionapp://oauth-callback');
@@ -49,8 +47,8 @@ console.log('Should be: app.rork.carinspectionapp://oauth-callback');
 const [request, response, promptAsync] = AuthSession.useAuthRequest(
   {
     clientId: clientId || '',
-    redirectUri,
-    scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
+    redirectUri: 'app.rork.carinspectionapp://oauth-callback',
+    scopes: ['yadisk:disk', 'cloud_api:disk.app_folder', 'cloud_api:disk.read', 'cloud_api:disk.write', 'cloud_api:disk.info'],
     responseType: AuthSession.ResponseType.Token,
   },
   discovery
