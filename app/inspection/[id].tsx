@@ -23,7 +23,8 @@ import {
   Clipboard,
   Platform,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { Video as ExpoVideo, ResizeMode } from 'expo-av';
+import { Photo, Video } from '../../types/inspections';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../../context/InspectionContext';
 import {
@@ -250,7 +251,7 @@ export default function InspectionDetailsScreen() {
               <View>
                 <Text style={styles.sectionTitle}>Фото ({inspection.photos.length})</Text>
                 <View style={styles.photoGrid}>
-                  {inspection.photos.map(photo => (
+                  {inspection.photos.map((photo: Photo) => (
                     <View key={photo.id} style={styles.photoContainer}>
                       <Image source={{ uri: photo.uri }} style={styles.photo} />
                     </View>
@@ -263,9 +264,9 @@ export default function InspectionDetailsScreen() {
               <View>
                 <Text style={styles.sectionTitle}>Видео ({inspection.videos.length})</Text>
                 <View style={styles.videoGrid}>
-                  {inspection.videos.map(video => (
+                  {inspection.videos.map((video: Video) => (
                     <View key={video.id} style={styles.videoContainer}>
-                      <Video
+                      <ExpoVideo
                         source={{ uri: video.uri }}
                         style={styles.video}
                         useNativeControls

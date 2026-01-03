@@ -117,7 +117,7 @@ export default function CameraScreen() {
     console.error('❌ Ошибка видео:', error);
     Alert.alert('Ошибка', 'Не удалось записать видео');
   }
-};
+}; 
 
   // =================== ОБРАБОТКА НАЖАТИЯ ===================
   const handleCapture = async () => {
@@ -138,8 +138,21 @@ export default function CameraScreen() {
     setMode(current => (current === 'photo' ? 'video' : 'photo'));
   };
 
-  const handleClose = () => router.back();
-  const handleViewPhotos = () => router.push(`/inspection/${inspectionId}`);
+  const handleClose = () => {
+  if (inspectionId) {
+    // Заменяем текущий экран камеры на экран осмотра
+    router.replace(`/inspection/${inspectionId}`);
+  } else {
+    router.back();
+  }
+};
+  const handleViewPhotos = () => {
+  if (inspectionId) {
+    router.replace(`/inspection/${inspectionId}`);
+  } else {
+    router.back();
+  }
+};
 
   // =================== РЕНДЕРИНГ ===================
   if (!cameraPermission) {
