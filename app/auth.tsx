@@ -34,24 +34,20 @@ export default function AuthScreen() {
     setDebugLogs(prev => [...prev.slice(-9), log]); // Храним последние 10 логов
   };
 
-  // Получаем clientId из переменных окружения
-  const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
+// Получаем clientId из переменных окружения
+const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
 
-  // Создаем запрос авторизации с использованием хука useAuthRequest
-  const redirectUri = AuthSession.makeRedirectUri({
-  scheme: 'app.rork.carinspectionapp',
-  path: 'oauth-callback',
-});
-console.log('Generated redirectUri for Android:', redirectUri);
+// Для Android Intent используем простую схему
+const redirectUri = 'app.rork.carinspectionapp://oauth-callback';
+console.log('Android Intent redirectUri:', redirectUri);
+
+// Создаем запрос авторизации
 const [request, response, promptAsync] = AuthSession.useAuthRequest(
   {
     clientId: clientId || '',
-    redirectUri, // Нужно указать, но makeRedirectUri создаст правильный
+    redirectUri,
     scopes: ['login:info', 'cloud_api:disk.info', 'cloud_api:disk.read', 'cloud_api:disk.write'],
     responseType: AuthSession.ResponseType.Token,
-    extraParams: {
-      force_confirm: 'true',
-    },
   },
   discovery
 );
@@ -102,42 +98,24 @@ const [request, response, promptAsync] = AuthSession.useAuthRequest(
 
   // Обработчик нажатия на кнопку подключения
   const handleConnect = async () => {
-  console.log('=== Android Intent Auth ===');
-  
   if (!clientId) {
     Alert.alert('Ошибка', 'Client ID не настроен');
     return;
   }
   
   if (!request) {
-    Alert.alert('Инфо', 'Запрос готовится... Попробуйте через 2 секунды');
+    Alert.alert('Ошибка', 'Запрос не готов');
     return;
   }
   
-  // Проверяем схему (уже знаем, что работает)
-  const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://');
-  if (!canOpen) {
-    Alert.alert('Ошибка', 'Схема не зарегистрирована. Переустановите приложение.');
-    return;
-  }
-  
-  Alert.alert('Запуск', 'Открывается Яндекс OAuth через Android Intent...');
+  Alert.alert('Запуск', 'Открывается авторизация Яндекс...');
   
   try {
     setIsAuthenticating(true);
-    
-    // Выводим отладочную информацию
-    console.log('Redirect URI для Android:', redirectUri);
-    console.log('Request ready:', !!request);
-    
     const result = await promptAsync();
-    console.log('Intent result:', result.type);
-    
     // Результат обработается в useEffect
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error('Intent auth error:', errorMessage);
-    Alert.alert('Ошибка', `Ошибка авторизации: ${errorMessage}`);
+    console.error('Auth error:', error);
     setIsAuthenticating(false);
   }
 };
@@ -248,8 +226,7 @@ const [request, response, promptAsync] = AuthSession.useAuthRequest(
             <TouchableOpacity
               style={[styles.connectButton, {backgroundColor: '#34C759', marginTop: 10}]}
               onPress={async () => {
-              const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://callback');
-              Alert.alert(
+              const canOpen = await Linking.canOpenURL('app.rork.carinspectionapp://oauth-callback');              Alert.alert(
               'Быстрый тест схемы',
               `Схема app.rork.carinspectionapp://callback\n\nРаботает: ${canOpen ? '✅ ДА' : '❌ НЕТ'}\n\nЕсли НЕТ - проверьте:\n1. app.json - scheme\n2. Переустановите приложение`
           );
