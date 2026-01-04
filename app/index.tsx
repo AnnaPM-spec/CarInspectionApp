@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import { Plus, Car, Clock, ExternalLink, Settings, Upload, CheckCircle2 } from 'lucide-react-native';
-import React from 'react';
+import { Plus, Car, Clock, Settings, Upload, CheckCircle2, Check } from 'lucide-react-native';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,13 +8,30 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
+import { SelectionActionBar } from './components/SelectionActionBar';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { inspections, isLoading, yandexAuth } = useInspections();
+  
+  const {
+    inspections = [],
+    isLoading = false,
+    yandexAuth = null,
+    selectedInspections = [],
+    toggleInspectionSelection = () => {},
+    selectAllInspections = () => {},
+    clearSelectedInspections = () => {},
+    deleteSelectedInspections = () => {},
+    setSelectionMode = () => {},
+    isInspectionSelected = () => false
+  } = useInspections();
+
+  const [localSelectionMode, setLocalSelectionMode] = useState(false);
 
   if (isLoading) {
     return (
@@ -28,7 +45,7 @@ export default function HomeScreen() {
 
   if (showWelcome) {
     return (
-      <SafeAreaView style={styles.container} edges={['top']}>
+      <SafeAreaView style={styles.fullContainer} edges={['top']}>
         <View style={styles.emptyContainer}>
           <Car size={80} color="#007AFF" strokeWidth={1.5} />
           <Text style={styles.emptyTitle}>Добро пожаловать!</Text>
@@ -53,37 +70,100 @@ export default function HomeScreen() {
   }
 
   const activeInspection = inspections.find(i => i.status === 'active');
+  const completedInspections = inspections.filter(i => i.status !== 'active');
+
+  const activateSelectionMode = () => {
+    console.log('Активация режима выбора');
+    setLocalSelectionMode(true);
+    setSelectionMode(true);
+  };
+
+  const deactivateSelectionMode = () => {
+    setLocalSelectionMode(false);
+    setSelectionMode(false);
+    clearSelectedInspections();
+  };
+
+  const handleCardPress = (inspectionId: string) => {
+    if (localSelectionMode) {
+      toggleInspectionSelection(inspectionId);
+    } else {
+      router.push(`/inspection/${inspectionId}`);
+    }
+  };
+
+  const handleCardLongPress = (inspectionId: string) => {
+    console.log('Долгое нажатие, активируем режим выбора');
+    if (!localSelectionMode) {
+      activateSelectionMode();
+      toggleInspectionSelection(inspectionId);
+    }
+  };
+
+  const handleMassDelete = () => {
+    if (selectedInspections.length === 0) return;
+
+    Alert.alert(
+      'Удалить выбранные осмотры?',
+      `Вы собираетесь удалить ${selectedInspections.length} осмотр(ов). Это действие нельзя отменить.`,
+      [
+        { text: 'Отмена', style: 'cancel' },
+        {
+          text: 'Удалить',
+          style: 'destructive',
+          onPress: () => {
+            deleteSelectedInspections();
+            deactivateSelectionMode();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSelectAll = () => {
+    const allCompletedIds = completedInspections.map(i => i.id);
+    const currentSelectedCount = selectedInspections.length;
+    
+    if (currentSelectedCount === allCompletedIds.length) {
+      clearSelectedInspections();
+    } else {
+      selectAllInspections();
+    }
+  };
+
+  const allSelected = selectedInspections.length === completedInspections.length && completedInspections.length > 0;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Осмотры</Text>
-          <Text style={styles.headerSubtitle}>
-            {inspections.length} {inspections.length === 1 ? 'осмотр' : 'осмотров'}
-          </Text>
+    <SafeAreaView style={styles.fullContainer} edges={['top', 'bottom']}>
+      <View style={styles.mainContent}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.headerTitle}>Осмотры</Text>
+            <Text style={styles.headerSubtitle}>
+              {inspections.length} {inspections.length === 1 ? 'осмотр' : 'осмотров'}
+            </Text>
+          </View>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => router.push('/auth')}
+            >
+              <Settings size={24} color="#007AFF" strokeWidth={2} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.newButton,
+                activeInspection && styles.newButtonDisabled,
+              ]}
+              onPress={() => router.push('/new-inspection')}
+              disabled={!!activeInspection}
+            >
+              <Plus size={24} color="#FFF" strokeWidth={2.5} />
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={styles.headerButtons}>
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={() => router.push('/auth')}
-          >
-            <Settings size={24} color="#007AFF" strokeWidth={2} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.newButton,
-              activeInspection && styles.newButtonDisabled,
-            ]}
-            onPress={() => router.push('/new-inspection')}
-            disabled={!!activeInspection}
-          >
-            <Plus size={24} color="#FFF" strokeWidth={2.5} />
-          </TouchableOpacity>
-        </View>
-      </View>
 
-      {activeInspection && (
+        {activeInspection && (
           <TouchableOpacity
             style={styles.activeCard}
             onPress={() => router.push(`/inspection/${activeInspection.id}`)}
@@ -108,70 +188,121 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         )}
-      <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
-        {inspections
-          .filter(i => i.status !== 'active')
-          .map(inspection => (
-            <TouchableOpacity
-              key={inspection.id}
-              style={styles.card}
-              onPress={() => router.push(`/inspection/${inspection.id}`)}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={styles.carName}>
-                  {inspection.carBrand || inspection.carModel}
-                </Text>
-                {inspection.status === 'uploading' && (
-          <View style={styles.statusBadgeUploading}>
-            <Upload size={14} color="#007AFF" />
-            <Text style={styles.statusBadgeTextUploading}>Загрузка...</Text>
-          </View>
-        )}
-        
-        {inspection.status === 'completed' && inspection.yandexDiskFolderUrl && (
-          <View style={styles.statusBadgeCompleted}>
-            <CheckCircle2 size={14} color="#34C759" />
-            <Text style={styles.statusBadgeTextCompleted}>Загружено</Text>
-          </View>
-        )}
-      </View>
-      
-      <View style={styles.cardDetails}>
-        <View style={styles.cardDetailItem}>
-          <Clock size={14} color="#8E8E93" strokeWidth={2} />
-          <Text style={styles.cardDetailText}>
-            {new Date(inspection.startTime).toLocaleString('ru-RU', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </Text>
-        </View>
-        <Text style={styles.cardPhotos}>
-          {inspection.photos.length} фото, {inspection.videos.length} видео
-        </Text>
-      </View>
-    </TouchableOpacity>
-  ))}
 
-        {inspections.filter(i => i.status !== 'active').length === 0 && (
-          <View style={styles.emptyList}>
-            <Text style={styles.emptyListText}>
-              Завершенных осмотров пока нет
-            </Text>
-          </View>
-        )}
-      </ScrollView>
+        <ScrollView 
+          style={styles.list} 
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.listContent,
+            localSelectionMode && styles.listWithSelection
+          ]}
+        >
+          {completedInspections.map(inspection => {
+            const isSelected = isInspectionSelected(inspection.id);
+            
+            return (
+              <TouchableOpacity
+                key={inspection.id}
+                style={[
+                  styles.card,
+                  localSelectionMode && styles.cardSelectionMode,
+                  isSelected && styles.cardSelected
+                ]}
+                onPress={() => handleCardPress(inspection.id)}
+                onLongPress={() => handleCardLongPress(inspection.id)}
+                activeOpacity={0.7}
+              >
+                {localSelectionMode && (
+                  <View style={styles.checkboxContainer}>
+                    <View style={[
+                      styles.checkbox,
+                      isSelected && styles.checkboxSelected
+                    ]}>
+                      {isSelected && (
+                        <Check size={14} color="#FFF" strokeWidth={3} />
+                      )}
+                    </View>
+                  </View>
+                )}
+                
+                <View style={styles.cardContent}>
+                  <View style={styles.cardHeader}>
+                    <Text style={[
+                      styles.carName,
+                      isSelected && styles.carNameSelected
+                    ]}>
+                      {inspection.carBrand || inspection.carModel}
+                    </Text>
+                    {inspection.status === 'uploading' && (
+                      <View style={styles.statusBadgeUploading}>
+                        <Upload size={14} color="#007AFF" />
+                        <Text style={styles.statusBadgeTextUploading}>Загрузка...</Text>
+                      </View>
+                    )}
+                    
+                    {inspection.status === 'completed' && inspection.yandexDiskFolderUrl && (
+                      <View style={styles.statusBadgeCompleted}>
+                        <CheckCircle2 size={14} color="#34C759" />
+                        <Text style={styles.statusBadgeTextCompleted}>Загружено</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <View style={styles.cardDetails}>
+                    <View style={styles.cardDetailItem}>
+                      <Clock size={14} color="#8E8E93" strokeWidth={2} />
+                      <Text style={styles.cardDetailText}>
+                        {new Date(inspection.startTime).toLocaleString('ru-RU', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                    </View>
+                    <Text style={styles.cardPhotos}>
+                      {inspection.photos.length} фото, {inspection.videos.length} видео
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+
+          {completedInspections.length === 0 && (
+            <View style={styles.emptyList}>
+              <Text style={styles.emptyListText}>
+                Завершенных осмотров пока нет
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+
+      {/* Панель действий - внизу экрана, но внутри основного контента */}
+      {localSelectionMode && (
+        <View style={styles.actionBarContainer}>
+          <SelectionActionBar
+            selectedCount={selectedInspections.length}
+            onDelete={handleMassDelete}
+            onCancel={deactivateSelectionMode}
+            showSelectAll={true}
+            onSelectAll={handleSelectAll}
+            allSelected={allSelected}
+          />
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
-
 const styles = StyleSheet.create({
-  container: {
+  fullContainer: {
     flex: 1,
     backgroundColor: '#F2F2F7',
+  },
+  mainContent: {
+    flex: 1,
   },
   centerContainer: {
     flex: 1,
@@ -317,7 +448,10 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
+  },
+  listContent: {
     paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   card: {
     backgroundColor: '#FFF',
@@ -329,6 +463,36 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 4,
     elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  cardSelectionMode: {
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  cardSelected: {
+    backgroundColor: '#F0F8FF',
+    borderColor: '#007AFF',
+  },
+  checkboxContainer: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#C7C7CC',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  cardContent: {
+    flex: 1,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -341,6 +505,9 @@ const styles = StyleSheet.create({
     fontWeight: '600' as const,
     color: '#000',
     flex: 1,
+  },
+  carNameSelected: {
+    color: '#007AFF',
   },
   cardDetails: {
     flexDirection: 'row',
@@ -369,54 +536,59 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#8E8E93',
   },
-  // Добавьте после существующих стилей:
-statusBadgeUploading: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: '#F0F8FF',
-  paddingHorizontal: 8,
-  paddingVertical: 4,
-  borderRadius: 12,
-  gap: 4,
-},
-statusBadgeTextUploading: {
-  fontSize: 12,
-  color: '#007AFF',
-  fontWeight: '500',
-},
-statusBadgeCompleted: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: '#F0FFF0',
-  paddingHorizontal: 8,
-  paddingVertical: 4,
-  borderRadius: 12,
-  gap: 4,
-},
-statusBadgeTextCompleted: {
-  fontSize: 12,
-  color: '#34C759',
-  fontWeight: '500',
-},
-activeDetails: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  marginTop: 4,
-},
-activeUploadingBadge: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  paddingHorizontal: 8,
-  paddingVertical: 4,
-  borderRadius: 12,
-  gap: 4,
-},
-activeUploadingText: {
-  fontSize: 12,
-  color: '#FFF',
-  fontWeight: '500',
-  marginLeft: 4,
-},
+  statusBadgeUploading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F8FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  statusBadgeTextUploading: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  statusBadgeCompleted: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FFF0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  statusBadgeTextCompleted: {
+    fontSize: 12,
+    color: '#34C759',
+    fontWeight: '500',
+  },
+  activeDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  activeUploadingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  activeUploadingText: {
+    fontSize: 12,
+    color: '#FFF',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  listWithSelection: {
+    paddingBottom: 80, // Отступ для панели действий
+  },
+  actionBarContainer: {
+    backgroundColor: '#FFF',
+  },
 });
