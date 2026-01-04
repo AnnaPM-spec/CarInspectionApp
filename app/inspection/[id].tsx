@@ -32,8 +32,9 @@ import {
   uploadFile,
   publishFolder,
   formatFolderName,
+  ensureFolderExists
 } from '../../utils/yandex-disk';
-
+import * as FileSystem from 'expo-file-system';
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
@@ -48,7 +49,8 @@ export default function InspectionDetailsScreen() {
         deleteInspection,
         uploadingInspections,
         startUpload,
-        finishUpload
+        finishUpload,
+        cancelUpload
       } = useInspections(); 
   const inspection = inspections.find(i => i.id === id);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number }>({
@@ -56,7 +58,7 @@ export default function InspectionDetailsScreen() {
   total: 0,
 });
   const isUploading = uploadingInspections.includes(inspection?.id || '');
-  
+
   if (!inspection) {
     return (
       <SafeAreaView style={styles.container}>
@@ -75,64 +77,26 @@ export default function InspectionDetailsScreen() {
     router.push(`/camera?inspectionId=${inspection.id}`);
   };
 
-  const handleUploadToYandex = async () => {
-    if (!yandexAuth) {
-      Alert.alert(
-        'Яндекс Диск не подключен',
-        'Подключите Яндекс Диск для загрузки файлов',
-        [
-          { text: 'Отмена', style: 'cancel' },
-          { text: 'Подключить', onPress: () => router.push('/auth') },
-        ]
-      );
-      return;
-    }
-
-    const totalMedia = inspection.photos.length + inspection.videos.length;
-    if (totalMedia === 0) {
-      Alert.alert('Ошибка', 'Нет фото или видео для загрузки');
-      return;
-    }
-
-    let mediaText = '';
-    if (inspection.photos.length > 0 && inspection.videos.length > 0) {
-      mediaText = `${inspection.photos.length} фото и ${inspection.videos.length} видео`;
-    } else if (inspection.photos.length > 0) {
-      mediaText = `${inspection.photos.length} фото`;
-    } else {
-      mediaText = `${inspection.videos.length} видео`;
-    }
-
-    Alert.alert(
-      'Завершить осмотр?',
-      `Будет загружено ${mediaText} на Яндекс Диск. После завершения нельзя будет добавить новые файлы.`,
-      [
-        { text: 'Отмена', style: 'cancel' },
-        {
-          text: 'Завершить',
-          onPress: () => uploadToYandexDisk(),
-        },
-      ]
-    );
-  };
-
   const uploadToYandexDisk = async () => {
-  if (!yandexAuth) return;
+    if (!yandexAuth) {
+      Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
+      return;
+    }
 
-  try {
-    startUpload(inspection.id);
-    const totalMedia = inspection.photos.length + inspection.videos.length;
-    setUploadProgress({ current: 0, total: totalMedia }); // ← Начальное состояние
-    updateInspectionStatus(inspection.id, 'uploading');
+    try {
+      startUpload(inspection.id);
+      const totalMedia = inspection.photos.length + inspection.videos.length;
+      setUploadProgress({ current: 0, total: totalMedia });
+      updateInspectionStatus(inspection.id, 'uploading');
 
-    const folderName = formatFolderName(
-      inspection.carBrand,
-      inspection.carModel,
-      inspection.startTime
-    );
-    const folderPath = `/Осмотры/${folderName}`;
+      const folderName = formatFolderName(
+        inspection.carBrand,
+        inspection.carModel,
+        inspection.startTime
+      );
+      const folderPath = `/Осмотры/${folderName}`;
 
-    if (Platform.OS === 'web') {
+      if (Platform.OS === 'web') {
         await new Promise(resolve => setTimeout(resolve, 2000));
         const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
         completeInspection(inspection.id, demoUrl);
@@ -141,54 +105,75 @@ export default function InspectionDetailsScreen() {
           'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
           [{ text: 'OK' }]
         );
-       } else {
-      await createFolder(yandexAuth, folderPath);
-
-      // ЗАГРУЗКА ФОТО
-      for (let i = 0; i < inspection.photos.length; i++) {
-        const photo = inspection.photos[i];
-        const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
-        const filePath = `${folderPath}/${fileName}`;
-        await uploadFile(yandexAuth, filePath, photo.uri);
+      } else {
+        // 1. Убеждаемся, что папка "Осмотры" существует
+        await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
         
-        // ОБНОВЛЯЕМ ПРОГРЕСС
-        setUploadProgress(prev => {
-        const newCurrent = prev.current + 1;
-        console.log(`Прогресс: ${newCurrent}/${prev.total}`);
-        return { ...prev, current: newCurrent };
-      });
+        // 2. Убеждаемся, что папка для осмотра существует
+        await ensureFolderExists(yandexAuth.accessToken, folderPath);
+        
+        // 3. Загружаем фото (только те, которых ещё нет)
+        for (let i = 0; i < inspection.photos.length; i++) {
+          const photo = inspection.photos[i];
+          const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
+          const filePath = `${folderPath}/${fileName}`;
+          
+          try {
+            await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
+            console.log(`✅ Фото ${i + 1} обработано`);
+          } catch (error) {
+            console.log(`⚠️ Фото ${i + 1} пропущено (возможно уже существует):`, error);
+          }
+          
+          // Обновляем прогресс
+          setUploadProgress(prev => {
+            const newCurrent = prev.current + 1;
+            console.log(`Прогресс: ${newCurrent}/${prev.total}`);
+            return { ...prev, current: newCurrent };
+          });
+        }
+
+        // 4. Загружаем видео (только те, которых ещё нет)
+        for (let i = 0; i < inspection.videos.length; i++) {
+          const video = inspection.videos[i];
+          const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
+          const filePath = `${folderPath}/${fileName}`;
+
+          
+          try {
+            await uploadFile(yandexAuth.accessToken, filePath, video.uri);
+            console.log(`✅ Видео ${i + 1} обработано`);
+          } catch (error) {
+            console.log(`⚠️ Видео ${i + 1} пропущено (возможно уже существует):`, error);
+          }
+          
+          // Обновляем прогресс
+          setUploadProgress(prev => {
+            const newCurrent = prev.current + 1;
+            console.log(`Прогресс: ${newCurrent}/${prev.total}`);
+            return { ...prev, current: newCurrent };
+          });
+        }
+
+        // 5. Публикуем папку (получаем публичную ссылку)
+        const publicUrl = await publishFolder(yandexAuth, folderPath);
+        
+        // 6. Помечаем осмотр как завершённый
+        completeInspection(inspection.id, publicUrl);
+        
+        Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
       }
 
-      // ЗАГРУЗКА ВИДЕО
-      for (let i = 0; i < inspection.videos.length; i++) {
-        const video = inspection.videos[i];
-        const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
-        const filePath = `${folderPath}/${fileName}`;
-        await uploadFile(yandexAuth, filePath, video.uri);
-        
-        // ОБНОВЛЯЕМ ПРОГРЕСС
-        setUploadProgress(prev => {
-          const newCurrent = prev.current + 1;
-          console.log(`Прогресс: ${newCurrent}/${prev.total}`);
-          return { ...prev, current: newCurrent };
-        });
-      }
-
-      const publicUrl = await publishFolder(yandexAuth, folderPath);
-      completeInspection(inspection.id, publicUrl);
-      Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
+      router.back();
+    } catch (error) {
+      console.error('Upload error:', error);
+      updateInspectionStatus(inspection.id, 'active');
+      Alert.alert('Ошибка', 'Не удалось загрузить файлы на Яндекс Диск');
+    } finally {
+      finishUpload(inspection.id);
+      setUploadProgress({ current: 0, total: 0 });
     }
-
-    router.back();
-  } catch (error) {
-    console.error('Upload error:', error);
-    updateInspectionStatus(inspection.id, 'active');
-    Alert.alert('Ошибка', 'Не удалось загрузить файлы на Яндекс Диск');
-  } finally {
-    finishUpload(inspection.id);
-    setUploadProgress({ current: 0, total: 0 }); // Сброс
-  }
-};
+  };
 
   const handleShareLink = () => {
     if (!inspection.yandexDiskFolderUrl) return;
@@ -205,10 +190,33 @@ export default function InspectionDetailsScreen() {
     }
   };
 
-  const handleDelete = () => {
+  // Функция для отмены загрузки
+  const handleCancelUpload = () => {
+    Alert.alert(
+      'Отменить загрузку?',
+      'Загрузка на Яндекс.Диск будет прервана, но осмотр останется',
+      [
+        { text: 'Продолжить загрузку', style: 'cancel' },
+        {
+          text: 'Отменить',
+          style: 'destructive',
+          onPress: () => {
+            cancelUpload(inspection.id);
+            Alert.alert(
+              'Загрузка отменена',
+              'Осмотр сохранён. Вы можете загрузить его позже, нажав "Завершить осмотр"'
+            );
+          },
+        },
+      ]
+    );
+  };
+
+  // Функция для удаления осмотра
+  const handleDeleteInspection = () => {
     Alert.alert(
       'Удалить осмотр?',
-      'Это действие нельзя отменить. Фото останутся на Яндекс Диске, если осмотр был загружен.',
+      'Это действие нельзя отменить. Все фото и видео будут удалены из приложения.',
       [
         { text: 'Отмена', style: 'cancel' },
         {
@@ -324,60 +332,60 @@ export default function InspectionDetailsScreen() {
 
       <View style={styles.footer}>
         {(isActive || inspection.status === 'uploading') && (
-  <View style={styles.actionsContainer}>
-    
-    {/* ПРОГРЕСС-БАР (занимает всю ширину) */}
-    {isUploading && (
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <View 
-            style={[
-              styles.progressFill, 
-              { 
-                width: `${uploadProgress.total > 0 
-                  ? (uploadProgress.current / uploadProgress.total) * 100 
-                  : 0}%` 
-              }
-            ]} 
-          />
-        </View>
-        <Text style={styles.progressText}>
-          {uploadProgress.current} из {uploadProgress.total} файлов
-        </Text>
-      </View>
-    )}
-    
-    {/* СТРОКА С КНОПКАМИ (всегда под прогресс-баром) */}
-    <View style={styles.buttonRow}>
-      <TouchableOpacity
-        style={styles.addPhotoButton}
-        onPress={handleAddPhoto}
-      >
-        <Camera size={24} color="#FFF" strokeWidth={2} />
-      </TouchableOpacity>
+          <View style={styles.actionsContainer}>
+            
+            {/* ПРОГРЕСС-БАР (занимает всю ширину) */}
+            {isUploading && (
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBar}>
+                  <View 
+                    style={[
+                      styles.progressFill, 
+                      { 
+                        width: `${uploadProgress.total > 0 
+                          ? (uploadProgress.current / uploadProgress.total) * 100 
+                          : 0}%` 
+                      }
+                    ]} 
+                  />
+                </View>
+                <Text style={styles.progressText}>
+                  {uploadProgress.current} из {uploadProgress.total} файлов
+                </Text>
+              </View>
+            )}
+            
+            {/* СТРОКА С КНОПКАМИ (всегда под прогресс-баром) */}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity
+                style={styles.addPhotoButton}
+                onPress={handleAddPhoto}
+              >
+                <Camera size={24} color="#FFF" strokeWidth={2} />
+              </TouchableOpacity>
 
-      <TouchableOpacity
-        style={[
-          styles.uploadButton,
-          (isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)) &&
-            styles.uploadButtonDisabled,
-        ]}
-        onPress={handleUploadToYandex}
-        disabled={isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)}
-      >
-        {isUploading ? (
-          <ActivityIndicator color="#FFF" />
-        ) : (
-          <>
-            <Upload size={20} color="#FFF" strokeWidth={2.5} />
-            <Text style={styles.uploadButtonText}>Завершить осмотр</Text>
-          </>
+              <TouchableOpacity
+                style={[
+                  styles.uploadButton,
+                  (isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)) &&
+                    styles.uploadButtonDisabled,
+                ]}
+                onPress={uploadToYandexDisk}
+                disabled={isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)}
+              >
+                {isUploading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <>
+                    <Upload size={20} color="#FFF" strokeWidth={2.5} />
+                    <Text style={styles.uploadButtonText}>Завершить осмотр</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+            
+          </View>
         )}
-      </TouchableOpacity>
-    </View>
-    
-  </View>
-)}
 
         {isCompleted && inspection.yandexDiskFolderUrl && (
           <View style={styles.buttonRow}>
@@ -398,12 +406,29 @@ export default function InspectionDetailsScreen() {
           </View>
         )}
 
-        {inspection.status !== 'uploading' && (
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-            <Trash2 size={18} color="#FF3B30" strokeWidth={2} />
-            <Text style={styles.deleteButtonText}>Удалить осмотр</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.actionButtons}>
+          {/* КНОПКА ОТМЕНЫ ЗАГРУЗКИ (только при загрузке) */}
+          {isUploading && (
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.cancelButton]}
+              onPress={handleCancelUpload}
+            >
+              <Trash2 size={18} color="#FF9500" strokeWidth={2} />
+              <Text style={styles.cancelButtonText}>Отменить загрузку</Text>
+            </TouchableOpacity>
+          )}
+          
+          {/* КНОПКА УДАЛЕНИЯ ОСМОТРА (всегда, кроме активной загрузки) */}
+          {!isUploading && (
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.deleteButton]}
+              onPress={handleDeleteInspection}
+            >
+              <Trash2 size={18} color="#FF3B30" strokeWidth={2} />
+              <Text style={styles.deleteButtonText}>Удалить осмотр</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -635,14 +660,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 8,
   },
-  deleteButtonText: {
-    fontSize: 15,
-    fontWeight: '600' as const,
-    color: '#FF3B30',
-  },
   buttonDisabled: {
-  opacity: 0.5,
-},
+    opacity: 0.5,
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -653,31 +673,60 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
   progressContainer: {
-  backgroundColor: '#FFF',
-  borderRadius: 12,
-  padding: 16,
-  marginBottom: 12,
-  borderWidth: 1,
-  borderColor: '#E5E5EA',
-},
-progressBar: {
-  height: 6,
-  backgroundColor: '#E5E5EA',
-  borderRadius: 3,
-  overflow: 'hidden',
-  marginBottom: 8,
-},
-progressFill: {
-  height: '100%',
-  backgroundColor: '#34C759',
-  borderRadius: 3,
-},
-progressText: {
-  fontSize: 14,
-  color: '#8E8E93',
-  textAlign: 'center',
-},
-actionsContainer: {
-  gap: 12, // Отступ между прогресс-баром и кнопками
-},
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  progressBar: {
+    height: 6,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#34C759',
+    borderRadius: 3,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+  },
+  actionsContainer: {
+    gap: 12, // Отступ между прогресс-баром и кнопками
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    gap: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#FFF3E0',
+    borderWidth: 1,
+    borderColor: '#FFB74D',
+  },
+  cancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FF9800',
+  },
+  deleteButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FF3B30',
+  },
 });

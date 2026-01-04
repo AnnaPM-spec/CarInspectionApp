@@ -1,4 +1,5 @@
 import { YandexDiskAuth } from '../types/inspections';
+import * as FileSystem from 'expo-file-system';
 
 const YANDEX_API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 
@@ -9,58 +10,112 @@ export interface YandexDiskFile {
   public_url?: string;
 }
 
-
-
-export const createFolder = async (
-  auth: YandexDiskAuth,
+// Функция для рекурсивного создания папок (если не существует)
+export const ensureFolderExists = async (
+  accessToken: string,
   folderPath: string
 ): Promise<void> => {
-  const response = await fetch(`${YANDEX_API_BASE}/resources?path=${encodeURIComponent(folderPath)}`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `OAuth ${auth.accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to create folder: ${error}`);
+  try {
+    // Проверяем существует ли папка
+    await fetch(
+      `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(folderPath)}`,
+      {
+        headers: { Authorization: `OAuth ${accessToken}` },
+      }
+    );
+    // Папка существует, ничего не делаем
+    console.log(`Папка ${folderPath} уже существует`);
+  } catch (error: any) {
+    if (error?.status === 404) {
+      // Папка не существует, создаём её
+      await fetch(
+        `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(folderPath)}`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `OAuth ${accessToken}` },
+        }
+      );
+      console.log(`Папка ${folderPath} создана`);
+    } else {
+      throw error;
+    }
   }
 };
 
-export const uploadFile = async (
-  auth: YandexDiskAuth,
-  filePath: string,
-  fileUri: string
+export const createFolder = async (
+  accessToken: string,
+  folderPath: string
 ): Promise<void> => {
-  const uploadUrlResponse = await fetch(
-    `${YANDEX_API_BASE}/resources/upload?path=${encodeURIComponent(filePath)}&overwrite=true`,
+  // Разбиваем путь на части
+  const parts = folderPath.split('/').filter(Boolean);
+  let currentPath = '';
+  
+  // Рекурсивно создаём все папки в пути
+  for (const part of parts) {
+    currentPath += `/${part}`;
+    await ensureFolderExists(accessToken, currentPath);
+  }
+  
+  console.log(`Все папки в пути ${folderPath} готовы`);
+};
+export const uploadFile = async (
+  accessToken: string,
+  filePath: string,
+  localUri: string
+): Promise<void> => {
+  try {
+    // Сначала проверяем, существует ли файл
+    const checkResponse = await fetch(
+      `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(filePath)}`,
+      {
+        headers: { Authorization: `OAuth ${accessToken}` },
+      }
+    );
+    
+    if (checkResponse.ok) {
+      console.log(`Файл ${filePath} уже существует, пропускаем`);
+      return;
+    }
+  } catch (error: any) {
+    if (error?.status !== 404) {
+      throw error;
+    }
+  }
+  
+  const uploadResponse = await fetch(
+    `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(filePath)}&overwrite=false`,
     {
       headers: {
-        Authorization: `OAuth ${auth.accessToken}`,
+        Authorization: `OAuth ${accessToken}`,
       },
     }
   );
 
-  if (!uploadUrlResponse.ok) {
-    throw new Error('Failed to get upload URL');
+  if (!uploadResponse.ok) {
+    const error = await uploadResponse.json();
+    throw new Error(`Failed to get upload link: ${JSON.stringify(error)}`);
   }
 
-  const { href } = await uploadUrlResponse.json();
+  const { href } = await uploadResponse.json();
 
-  const fileResponse = await fetch(fileUri);
-  const fileBlob = await fileResponse.blob();
-
-  const uploadResponse = await fetch(href, {
+  // Альтернативный способ чтения файла
+  const fileBlob = await (await fetch(localUri)).blob();
+  
+  // Загружаем файл на Яндекс.Диск
+  const uploadResult = await fetch(href, {
     method: 'PUT',
     body: fileBlob,
+    headers: {
+      'Content-Type': fileBlob.type || 'application/octet-stream',
+    },
   });
 
-  if (!uploadResponse.ok) {
+  if (!uploadResult.ok) {
     throw new Error('Failed to upload file');
   }
+  
+  console.log(`Файл ${filePath} успешно загружен`);
 };
-
 export const publishFolder = async (
   auth: YandexDiskAuth,
   folderPath: string

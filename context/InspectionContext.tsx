@@ -17,30 +17,43 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
   }, []);
 
   const loadData = async () => {
-    try {
-      const [inspectionsData, authData] = await Promise.all([
-        AsyncStorage.getItem(INSPECTIONS_STORAGE_KEY),
-        AsyncStorage.getItem(YANDEX_AUTH_STORAGE_KEY),
-      ]);
+  try {
+    const [inspectionsData, authData] = await Promise.all([
+      AsyncStorage.getItem(INSPECTIONS_STORAGE_KEY),
+      AsyncStorage.getItem(YANDEX_AUTH_STORAGE_KEY),
+    ]);
 
-      if (inspectionsData) {
-        setInspections(JSON.parse(inspectionsData));
-      }
-
-      if (authData) {
-        const auth = JSON.parse(authData);
-        if (auth.expiresAt > Date.now()) {
-          setYandexAuth(auth);
-        } else {
-          await AsyncStorage.removeItem(YANDEX_AUTH_STORAGE_KEY);
+    if (inspectionsData) {
+      const parsedInspections: Inspection[] = JSON.parse(inspectionsData);
+      
+      // ⭐ АВТООЧИСТКА: сброс старых статусов 'uploading'
+      const cleanedInspections = parsedInspections.map((inspection) => {
+        if (inspection.status === 'uploading') {
+          return { 
+            ...inspection, 
+            status: 'active' as const
+          };
         }
-      }
-    } catch (error) {
-      console.error('Failed to load data:', error);
-    } finally {
-      setIsLoading(false);
+        return inspection;
+      });
+      
+      setInspections(cleanedInspections);
     }
-  };
+
+    if (authData) {
+      const auth = JSON.parse(authData);
+      if (auth.expiresAt > Date.now()) {
+        setYandexAuth(auth);
+      } else {
+        await AsyncStorage.removeItem(YANDEX_AUTH_STORAGE_KEY);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load data:', error);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const saveInspections = async (newInspections: Inspection[]) => {
     try {
@@ -153,15 +166,39 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
   }, []);
 
   const cancelUpload = useCallback((inspectionId: string) => {
-    setUploadingInspections(prev => prev.filter(id => id !== inspectionId));
-    updateInspectionStatus(inspectionId, 'active');
-  }, [updateInspectionStatus]);
+  // 1. Удаляем из списка текущих загрузок
+  setUploadingInspections(prev => prev.filter(id => id !== inspectionId));
+  
+  // 2. Возвращаем статус осмотра на 'active' (но НЕ удаляем осмотр!)
+  updateInspectionStatus(inspectionId, 'active');
+  
+  console.log(`Загрузка отменена для осмотра ${inspectionId}`);
+}, [updateInspectionStatus]);
+
+    // ⭐ НОВАЯ ФУНКЦИЯ ДЛЯ ОЧИСТКИ "ЗАВИСШИХ" ЗАГРУЗОК
+  const cleanupStuckUploads = useCallback(() => {
+    // 1. Очищаем массив текущих загрузок
+    setUploadingInspections([]);
+    
+    // 2. Сбрасываем статусы всех "зависших" осмотров с 'uploading' на 'active'
+    const updated = inspections.map(inspection => {
+      if (inspection.status === 'uploading') {
+        return { ...inspection,
+                 status: 'active' as const };
+      }
+      return inspection;
+    });
+    
+    // 3. Сохраняем изменения
+    saveInspections(updated);
+  }, [inspections]);
+  
 
   return {
     inspections,
     yandexAuth,
     isLoading,
-    uploadingInspections, // ← НОВОЕ
+    uploadingInspections,
     createInspection,
     addPhoto,
     addVideo,
@@ -170,8 +207,10 @@ export const [InspectionProvider, useInspections] = createContextHook(() => {
     deleteInspection,
     saveYandexAuth,
     clearYandexAuth,
-    startUpload,    // ← НОВОЕ
-    finishUpload,   // ← НОВОЕ
-    cancelUpload,   // ← НОВОЕ
+    startUpload,
+    finishUpload,
+    cancelUpload,
+    cleanupStuckUploads,
   };
+  
 });
