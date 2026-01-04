@@ -14,32 +14,67 @@ export interface YandexDiskFile {
 export const ensureFolderExists = async (
   accessToken: string,
   folderPath: string
-): Promise<void> => {
-  try {
-    // Проверяем существует ли папка
-    await fetch(
-      `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(folderPath)}`,
-      {
-        headers: { Authorization: `OAuth ${accessToken}` },
-      }
-    );
-    // Папка существует, ничего не делаем
-    console.log(`Папка ${folderPath} уже существует`);
-  } catch (error: any) {
-    if (error?.status === 404) {
-      // Папка не существует, создаём её
-      await fetch(
-        `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(folderPath)}`,
+): Promise<boolean> => {
+  console.log(`🔄 Создаем/проверяем папку: "${folderPath}"`);
+  
+  // Разбиваем путь на части и создаем рекурсивно
+  const parts = folderPath.split('/').filter(Boolean);
+  let currentPath = '';
+  
+  for (const part of parts) {
+    currentPath += `/${part}`;
+    
+    try {
+      // 1. Пытаемся создать папку
+      const createResponse = await fetch(
+        `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(currentPath)}`,
         {
           method: 'PUT',
-          headers: { Authorization: `OAuth ${accessToken}` },
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
         }
       );
-      console.log(`Папка ${folderPath} создана`);
-    } else {
+      
+      if (createResponse.ok) {
+        console.log(`✅ Папка "${currentPath}" создана`);
+      } else if (createResponse.status === 409) {
+        console.log(`⚠️ Папка "${currentPath}" уже существует`);
+      } else {
+        const error = await createResponse.json();
+        console.error(`❌ Ошибка создания папки "${currentPath}":`, error);
+        throw new Error(`Failed to create folder: ${JSON.stringify(error)}`);
+      }
+      
+      // 2. Сразу проверяем, что папка доступна
+      await new Promise(resolve => setTimeout(resolve, 300)); // Небольшая задержка
+      
+      const checkResponse = await fetch(
+        `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(currentPath)}&fields=name,path,type`,
+        {
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+            'Accept': 'application/json'
+          },
+        }
+      );
+      
+      if (!checkResponse.ok) {
+        console.warn(`⚠️ Папка "${currentPath}" создана, но недоступна для чтения`);
+      } else {
+        const data = await checkResponse.json();
+        console.log(`✅ Папка "${currentPath}" доступна:`, data);
+      }
+      
+    } catch (error) {
+      console.error(`❌ Критическая ошибка для папки "${currentPath}":`, error);
       throw error;
     }
   }
+  
+  return true;
 };
 
 export const createFolder = async (
@@ -64,58 +99,66 @@ export const uploadFile = async (
   localUri: string
 ): Promise<void> => {
   try {
-    // Сначала проверяем, существует ли файл
-    const checkResponse = await fetch(
-      `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(filePath)}`,
+    console.log(`🔄 Начинаем загрузку файла: ${filePath}`);
+    console.log(`🔄 Локальный URI: ${localUri}`);
+    
+    // 1. Получаем ссылку для загрузки
+    const uploadResponse = await fetch(
+      `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(filePath)}&overwrite=false`,
       {
-        headers: { Authorization: `OAuth ${accessToken}` },
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+          'Accept': 'application/json'
+        },
       }
     );
+
+    if (!uploadResponse.ok) {
+      const error = await uploadResponse.json();
+      console.error(`❌ Ошибка получения ссылки для ${filePath}:`, error);
+      throw new Error(`Failed to get upload link: ${JSON.stringify(error)}`);
+    }
+
+    const { href } = await uploadResponse.json();
+    console.log(`✅ Получена ссылка для загрузки: ${href.substring(0, 50)}...`);
+
+    // 2. Читаем файл с устройства (НОВЫЙ СПОСОБ)
+    console.log(`📥 Читаем локальный файл...`);
     
-    if (checkResponse.ok) {
-      console.log(`Файл ${filePath} уже существует, пропускаем`);
-      return;
+    // Способ 1: Используем fetch для чтения файла
+    const fileResponse = await fetch(localUri);
+    if (!fileResponse.ok) {
+      throw new Error(`Не удалось прочитать локальный файл: ${fileResponse.status}`);
     }
-  } catch (error: any) {
-    if (error?.status !== 404) {
-      throw error;
-    }
-  }
-  
-  const uploadResponse = await fetch(
-    `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(filePath)}&overwrite=false`,
-    {
+    
+    const blob = await fileResponse.blob();
+    console.log(`📥 Размер файла: ${blob.size} байт, тип: ${blob.type}`);
+    
+    // 3. Загружаем файл на Яндекс.Диск
+    console.log(`🔼 Загружаем файл на Яндекс.Диск...`);
+    const uploadResult = await fetch(href, {
+      method: 'PUT',
+      body: blob,
       headers: {
-        Authorization: `OAuth ${accessToken}`,
+        'Content-Type': blob.type || 'application/octet-stream',
+        'Content-Length': blob.size.toString(),
       },
+    });
+
+    if (!uploadResult.ok) {
+      console.error(`❌ Ошибка загрузки файла ${filePath}:`, uploadResult.status, uploadResult.statusText);
+      const errorText = await uploadResult.text();
+      console.error(`❌ Детали ошибки:`, errorText.substring(0, 200));
+      throw new Error(`Failed to upload file: ${uploadResult.status} ${uploadResult.statusText}`);
     }
-  );
-
-  if (!uploadResponse.ok) {
-    const error = await uploadResponse.json();
-    throw new Error(`Failed to get upload link: ${JSON.stringify(error)}`);
+    
+    console.log(`✅ Файл ${filePath} успешно загружен`);
+  } catch (error) {
+    console.error(`❌ Критическая ошибка загрузки файла ${filePath}:`, error);
+    throw error;
   }
-
-  const { href } = await uploadResponse.json();
-
-  // Альтернативный способ чтения файла
-  const fileBlob = await (await fetch(localUri)).blob();
-  
-  // Загружаем файл на Яндекс.Диск
-  const uploadResult = await fetch(href, {
-    method: 'PUT',
-    body: fileBlob,
-    headers: {
-      'Content-Type': fileBlob.type || 'application/octet-stream',
-    },
-  });
-
-  if (!uploadResult.ok) {
-    throw new Error('Failed to upload file');
-  }
-  
-  console.log(`Файл ${filePath} успешно загружен`);
 };
+
 export const publishFolder = async (
   auth: YandexDiskAuth,
   folderPath: string
@@ -151,7 +194,7 @@ export const publishFolder = async (
   return data.public_url;
 };
 
-export const formatFolderName = (carBrand: string, carModel: string, timestamp: number): string => {
+export const formatFolderName = (inspectionName: string, timestamp: number): string => {
   const date = new Date(timestamp);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -159,5 +202,49 @@ export const formatFolderName = (carBrand: string, carModel: string, timestamp: 
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
 
-  return `${year}-${month}-${day}_${hours}-${minutes}_${carBrand}_${carModel}`;
+  // Оставляем русские буквы, убираем только спецсимволы
+  const safeName = inspectionName
+    .trim()
+    .replace(/[^a-zA-Zа-яА-Я0-9\s_-]/g, '')
+    .replace(/\s+/g, '_')
+    .substring(0, 30);
+
+  const finalName = safeName || 'Осмотр';
+
+  return `${year}-${month}-${day}_${hours}-${minutes}_${finalName}`;
+};
+// Функция для проверки пути
+export const checkPathExists = async (
+  accessToken: string,
+  path: string
+): Promise<boolean> => {
+  try {
+    console.log(`🔍 Проверяем путь: ${path}`);
+    console.log(`🔍 Закодированный путь: ${encodeURIComponent(path)}`);
+    
+    const response = await fetch(
+      `https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(path)}`,
+      {
+        headers: { 
+          Authorization: `OAuth ${accessToken}`,
+          'Accept': 'application/json'
+        },
+      }
+    );
+    
+    console.log(`🔍 Статус ответа: ${response.status}`);
+    
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`✅ Путь существует:`, data);
+      return true;
+    } else {
+      const error = await response.json();
+      console.log(`❌ Путь не существует:`, error);
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ Ошибка проверки пути:`, error);
+    return false;
+  }
 };

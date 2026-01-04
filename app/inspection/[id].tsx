@@ -20,11 +20,12 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  Clipboard,
   Platform,
+  Linking,
 } from 'react-native';
+//import * as Clipboard from 'expo-clipboard';
 import { Video as ExpoVideo, ResizeMode } from 'expo-av';
-import { Photo, Video } from '../../types/inspections';
+import { Photo, Video as InspectionVideo } from '../../types/inspections';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../../context/InspectionContext';
 import {
@@ -32,9 +33,9 @@ import {
   uploadFile,
   publishFolder,
   formatFolderName,
-  ensureFolderExists
+  ensureFolderExists,
+  checkPathExists
 } from '../../utils/yandex-disk';
-import * as FileSystem from 'expo-file-system';
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
@@ -78,117 +79,207 @@ export default function InspectionDetailsScreen() {
   };
 
   const uploadToYandexDisk = async () => {
-    if (!yandexAuth) {
-      Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
-      return;
-    }
+  if (!yandexAuth) {
+    Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
+    return;
+  }
 
-    try {
-      startUpload(inspection.id);
-      const totalMedia = inspection.photos.length + inspection.videos.length;
-      setUploadProgress({ current: 0, total: totalMedia });
-      updateInspectionStatus(inspection.id, 'uploading');
-
-      const folderName = formatFolderName(
-        inspection.carBrand,
-        inspection.carModel,
-        inspection.startTime
-      );
-      const folderPath = `/Осмотры/${folderName}`;
-
-      if (Platform.OS === 'web') {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
-        completeInspection(inspection.id, demoUrl);
-        Alert.alert(
-          'Готово!',
-          'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        // 1. Убеждаемся, что папка "Осмотры" существует
-        await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
+      console.log('🔑 Проверяем access token...');
+      try {
+        const checkToken = await fetch('https://cloud-api.yandex.net/v1/disk/', {
+          headers: { Authorization: `OAuth ${yandexAuth.accessToken}` },
+        });
         
-        // 2. Убеждаемся, что папка для осмотра существует
-        await ensureFolderExists(yandexAuth.accessToken, folderPath);
-        
-        // 3. Загружаем фото (только те, которых ещё нет)
-        for (let i = 0; i < inspection.photos.length; i++) {
-          const photo = inspection.photos[i];
-          const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
-          const filePath = `${folderPath}/${fileName}`;
-          
-          try {
-            await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
-            console.log(`✅ Фото ${i + 1} обработано`);
-          } catch (error) {
-            console.log(`⚠️ Фото ${i + 1} пропущено (возможно уже существует):`, error);
-          }
-          
-          // Обновляем прогресс
-          setUploadProgress(prev => {
-            const newCurrent = prev.current + 1;
-            console.log(`Прогресс: ${newCurrent}/${prev.total}`);
-            return { ...prev, current: newCurrent };
-          });
+        if (!checkToken.ok) {
+          const error = await checkToken.json();
+          console.error('❌ Токен невалиден:', error);
+          Alert.alert('Ошибка авторизации', 'Токен Яндекс.Диск недействителен');
+          return;
         }
+        
+        const diskInfo = await checkToken.json();
+        console.log('✅ Токен валиден, информация о диске:', diskInfo);
+      } catch (tokenError) {
+        console.error('❌ Ошибка проверки токена:', tokenError);
+        Alert.alert('Ошибка', 'Не удалось проверить авторизацию Яндекс.Диск');
+        return;
+      }
+  try {
+    startUpload(inspection.id);
+    const totalMedia = inspection.photos.length + inspection.videos.length;
+    setUploadProgress({ current: 0, total: totalMedia });
+    updateInspectionStatus(inspection.id, 'uploading');
 
-        // 4. Загружаем видео (только те, которых ещё нет)
+    const folderName = formatFolderName(
+      inspection.carBrand || inspection.carModel || 'Осмотр',
+      inspection.startTime
+    );
+    const folderPath = `/Осмотры/${folderName}`;
+
+    console.log('🔧 ИСПОЛЬЗУЕМ ТЕСТОВОЕ ИМЯ ПАПКИ:', folderPath);
+
+    console.log('📁 ========= НАЧАЛО ЗАГРУЗКИ =========');
+    console.log('📁 Имя папки:', folderName);
+    console.log('📁 Полный путь:', folderPath);
+    console.log('📁 Access Token:', yandexAuth.accessToken ? 'Есть' : 'Нет');
+    console.log('📁 Количество файлов:', totalMedia);
+
+    if (Platform.OS === 'web') {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
+      completeInspection(inspection.id, demoUrl);
+      Alert.alert(
+        'Готово!',
+        'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
+        [{ text: 'OK' }]
+      );
+    } else {
+      // 1. Проверяем, существует ли папка Осмотры
+      console.log('1️⃣ Проверяем папку /Осмотры...');
+      await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
+      
+      // 2. Проверяем/создаем папку для осмотра
+      console.log('2️⃣ Проверяем папку для осмотра...');
+      await ensureFolderExists(yandexAuth.accessToken, folderPath);
+      
+      // 3. Ждем 1 секунду
+      console.log('3️⃣ Ждем 1 секунду...');
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // 4. ПРОВЕРКА: Существует ли папка на самом деле?
+      console.log('4️⃣ Пропускаем дополнительную проверку, т.к. папка уже создана');
+      
+      // 5. Загружаем фото
+      console.log(`5️⃣ Загружаем ${inspection.photos.length} фото...`);
+      for (let i = 0; i < inspection.photos.length; i++) {
+        const photo = inspection.photos[i];
+        const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
+        const filePath = `${folderPath}/${fileName}`;
+        
+        console.log(`   📸 Фото ${i + 1}: ${filePath}`);
+        console.log(`   📸 Локальный URI: ${photo.uri}`);
+        
+        try {
+          console.log(`   📸 Загружаем фото ${i + 1}...`);
+          await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
+          console.log(`   ✅ Фото ${i + 1} загружено`);
+        } catch (error: any) {
+          console.log(`   ❌ Ошибка загрузки фото ${i + 1}:`, error.message);
+
+          // Продолжаем с другими файлами
+        }
+        
+        setUploadProgress(prev => ({
+          ...prev,
+          current: prev.current + 1
+        }));
+      }
+
+      // 6. Загружаем видео (если есть)
+      if (inspection.videos.length > 0) {
+        console.log(`6️⃣ Загружаем ${inspection.videos.length} видео...`);
         for (let i = 0; i < inspection.videos.length; i++) {
           const video = inspection.videos[i];
           const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
           const filePath = `${folderPath}/${fileName}`;
 
+          console.log(`   🎥 Видео ${i + 1}: ${filePath}`);
           
           try {
             await uploadFile(yandexAuth.accessToken, filePath, video.uri);
-            console.log(`✅ Видео ${i + 1} обработано`);
-          } catch (error) {
-            console.log(`⚠️ Видео ${i + 1} пропущено (возможно уже существует):`, error);
+            console.log(`   ✅ Видео ${i + 1} загружено`);
+          } catch (error: any) {
+            console.log(`   ❌ Ошибка загрузки видео ${i + 1}:`, error.message);
+            // Продолжаем с другими файлами
           }
           
-          // Обновляем прогресс
-          setUploadProgress(prev => {
-            const newCurrent = prev.current + 1;
-            console.log(`Прогресс: ${newCurrent}/${prev.total}`);
-            return { ...prev, current: newCurrent };
-          });
+          setUploadProgress(prev => ({
+            ...prev,
+            current: prev.current + 1
+          }));
         }
+      }
 
-        // 5. Публикуем папку (получаем публичную ссылку)
+      // 7. Публикуем папку
+      console.log('7️⃣ Публикуем папку...');
+      try {
         const publicUrl = await publishFolder(yandexAuth, folderPath);
+        console.log('✅ Публичная ссылка получена:', publicUrl);
         
-        // 6. Помечаем осмотр как завершённый
+        // 8. Помечаем осмотр как завершённый
         completeInspection(inspection.id, publicUrl);
         
         Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
+      } catch (publishError: any) {
+        console.error('❌ Ошибка публикации:', publishError);
+        // Даже если публикация не удалась, осмотр все равно завершаем
+        completeInspection(inspection.id, '');
+        Alert.alert('Частично успешно', 'Файлы загружены, но не удалось получить публичную ссылку');
       }
-
-      router.back();
-    } catch (error) {
-      console.error('Upload error:', error);
-      updateInspectionStatus(inspection.id, 'active');
-      Alert.alert('Ошибка', 'Не удалось загрузить файлы на Яндекс Диск');
-    } finally {
-      finishUpload(inspection.id);
-      setUploadProgress({ current: 0, total: 0 });
     }
-  };
 
-  const handleShareLink = () => {
-    if (!inspection.yandexDiskFolderUrl) return;
+    console.log('========= ЗАВЕРШЕНИЕ ЗАГРУЗКИ =========');
+    router.back();
+  } catch (error: any) {
+    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА ЗАГРУЗКИ:');
+    console.error('Сообщение:', error.message);
+    console.error('Стек:', error.stack);
+    
+    updateInspectionStatus(inspection.id, 'active');
+    Alert.alert('Ошибка', `Не удалось загрузить файлы на Яндекс Диск: ${error.message || 'Неизвестная ошибка'}`);
+  } finally {
+    finishUpload(inspection.id);
+    setUploadProgress({ current: 0, total: 0 });
+  }
+};
 
-    Clipboard.setString(inspection.yandexDiskFolderUrl);
-    Alert.alert('Скопировано', 'Ссылка скопирована в буфер обмена');
-  };
+  const handleShareLink = async () => {
+  if (!inspection.yandexDiskFolderUrl) return;
 
-  const handleOpenLink = () => {
-    if (!inspection.yandexDiskFolderUrl) return;
-    const url = inspection.yandexDiskFolderUrl;
-    if (Platform.OS === 'web') {
-      window.open(url, '_blank');
+  // Временное решение без expo-clipboard
+  Alert.alert(
+    'Ссылка на Яндекс.Диск',
+    inspection.yandexDiskFolderUrl,
+    [
+      { 
+        text: 'Скопировать', 
+        onPress: () => {
+          // Просто показываем ссылку, копирование временно отключено
+          Alert.alert('Скопировано', 'Ссылка показана выше');
+        }
+      },
+      { text: 'OK', style: 'cancel' }
+    ]
+  );
+};
+
+  const handleOpenLink = async () => {
+  if (!inspection.yandexDiskFolderUrl) return;
+  
+  const url = inspection.yandexDiskFolderUrl;
+  console.log('Открываем ссылку:', url);
+  
+  try {
+    // Проверяем, поддерживает ли устройство открытие ссылок
+    const supported = await Linking.canOpenURL(url);
+    
+    if (supported) {
+      if (Platform.OS === 'web') {
+        window.open(url, '_blank');
+      } else {
+        // Для Android и iOS
+        await Linking.openURL(url);
+        console.log('Ссылка успешно открыта');
+      }
+    } else {
+      console.log('Не удалось открыть ссылку:', url);
+      Alert.alert('Ошибка', 'Не удалось открыть ссылку на этом устройстве');
     }
-  };
+  } catch (error) {
+    console.error('Ошибка при открытии ссылки:', error);
+    Alert.alert('Ошибка', 'Не удалось открыть ссылку');
+  }
+};
 
   // Функция для отмены загрузки
   const handleCancelUpload = () => {
@@ -302,13 +393,14 @@ export default function InspectionDetailsScreen() {
               <View>
                 <Text style={styles.sectionTitle}>Видео ({inspection.videos.length})</Text>
                 <View style={styles.videoGrid}>
-                  {inspection.videos.map((video: Video) => (
+                  {inspection.videos.map((video: InspectionVideo) => (
                     <View key={video.id} style={styles.videoContainer}>
                       <ExpoVideo
                         source={{ uri: video.uri }}
                         style={styles.video}
                         useNativeControls
-                        resizeMode={ResizeMode.COVER}
+                        isLooping={false}
+                        shouldPlay={false}
                       />
                       <View style={styles.videoOverlay}>
                         <PlayCircle size={48} color="#FFF" strokeWidth={2} />
@@ -400,6 +492,10 @@ export default function InspectionDetailsScreen() {
             <TouchableOpacity
               style={styles.openLinkButton}
               onPress={handleOpenLink}
+              onLongPress={() => {
+                // Долгое нажатие показывает ссылку
+                Alert.alert('Ссылка', inspection.yandexDiskFolderUrl);
+              }}
             >
               <ExternalLink size={20} color="#FFF" strokeWidth={2} />
             </TouchableOpacity>
@@ -433,6 +529,8 @@ export default function InspectionDetailsScreen() {
     </SafeAreaView>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {
