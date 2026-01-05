@@ -37,6 +37,8 @@ import {
   checkPathExists
 } from '../../utils/yandex-disk';
 import { RenameModal } from '../components/RenameModal';
+import { checkConnectionWithAlert } from '../../utils/network';
+
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
@@ -88,7 +90,21 @@ export default function InspectionDetailsScreen() {
     Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
     return;
   }
-
+      console.log('📶 Проверяем интернет-соединение...');
+      const hasInternet = await checkConnectionWithAlert();
+      
+      if (!hasInternet) {
+        Alert.alert(
+          'Нет соединения',
+          'Проверьте подключение к интернету. Загрузка файлов на Яндекс.Диск невозможна без интернета.',
+          [
+            { text: 'Понятно', style: 'cancel' }
+          ]
+        );
+        return;
+      }
+      
+      console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
       console.log('🔑 Проверяем access token...');
       try {
         const checkToken = await fetch('https://cloud-api.yandex.net/v1/disk/', {
