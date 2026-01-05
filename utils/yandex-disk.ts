@@ -1,5 +1,6 @@
 import { YandexDiskAuth } from '../types/inspections';
-import * as FileSystem from 'expo-file-system';
+//import * as FileSystem from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
 
 const YANDEX_API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 
@@ -123,29 +124,31 @@ export const uploadFile = async (
     const { href } = await uploadResponse.json();
     console.log(`✅ Получена ссылка для загрузки: ${href.substring(0, 50)}...`);
 
-    // 2. Читаем файл через expo-file-system (ПРАВИЛЬНЫЙ СПОСОБ)
+    // 2. Читаем файл с устройства через legacy API
     console.log(`📥 Читаем локальный файл...`);
-
-    // СПОСОБ 1: Если EncodingType доступен
-    let fileContent: string;
-    try {
-      // Пробуем прочитать как base64 (используем строку 'base64' вместо EncodingType.Base64)
-      fileContent = await FileSystem.readAsStringAsync(localUri, {
-        encoding: 'base64' as any, // Используем строку вместо enum
-      });
-    } catch (readError) {
-      console.error('❌ Ошибка чтения файла:', readError);
-      throw new Error('Не удалось прочитать файл');
+    
+    // Проверяем, существует ли файл
+    const fileInfo = await FileSystemLegacy.getInfoAsync(localUri);
+    if (!fileInfo.exists) {
+      throw new Error('Файл не существует');
     }
     
+    // Читаем файл как base64 через legacy API
+    const fileContent = await FileSystemLegacy.readAsStringAsync(localUri, {
+      encoding: FileSystemLegacy.EncodingType.Base64,
+    });
+    
+    console.log(`📥 Файл прочитан, размер base64: ${fileContent.length} символов`);
+    
     // 3. Конвертируем base64 в ArrayBuffer
-    const base64Data = fileContent;
-    const byteCharacters = atob(base64Data);
+    const byteCharacters = atob(fileContent);
     const byteNumbers = new Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
       byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
     const byteArray = new Uint8Array(byteNumbers);
+    
+    console.log(`📥 Размер файла: ${byteArray.length} байт`);
     
     // 4. Загружаем файл на Яндекс.Диск
     console.log(`🔼 Загружаем файл на Яндекс.Диск...`);
@@ -171,7 +174,6 @@ export const uploadFile = async (
     throw error;
   }
 };
-
 // Альтернативная версия uploadFile с определением типа файла
 export const uploadFileWithMimeType = async (
   accessToken: string,
@@ -201,7 +203,7 @@ export const uploadFileWithMimeType = async (
     const { href } = await uploadResponse.json();
 
     // 2. Читаем файл через expo-file-system
-    const fileContent = await FileSystem.readAsStringAsync(localUri, {
+    const fileContent = await FileSystemLegacy.readAsStringAsync(localUri, {
       encoding: 'base64' as any,
     });
     

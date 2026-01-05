@@ -224,7 +224,7 @@ export default function InspectionDetailsScreen() {
     }
 
     console.log('========= ЗАВЕРШЕНИЕ ЗАГРУЗКИ =========');
-    router.back();
+    router.replace('/');
   } catch (error: any) {
     console.error('❌ КРИТИЧЕСКАЯ ОШИБКА ЗАГРУЗКИ:');
     console.error('Сообщение:', error.message);
@@ -348,7 +348,7 @@ export default function InspectionDetailsScreen() {
           style: 'destructive',
           onPress: () => {
             deleteInspection(inspection.id);
-            router.back();
+            router.replace('/');
           },
         },
       ]
@@ -594,8 +594,6 @@ export default function InspectionDetailsScreen() {
     </SafeAreaView>
   );
 }
-
-
 
 const styles = StyleSheet.create({
   container: {
