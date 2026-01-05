@@ -36,6 +36,7 @@ import {
   ensureFolderExists,
   checkPathExists
 } from '../../utils/yandex-disk';
+import { RenameModal } from '../components/RenameModal';
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
@@ -48,6 +49,7 @@ export default function InspectionDetailsScreen() {
         completeInspection, 
         updateInspectionStatus, 
         deleteInspection,
+        renameInspection,
         uploadingInspections,
         startUpload,
         finishUpload,
@@ -57,7 +59,10 @@ export default function InspectionDetailsScreen() {
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number }>({
   current: 0,
   total: 0,
-});
+  });
+
+  const [isRenameModalVisible, setIsRenameModalVisible] = useState(false);
+
   const isUploading = uploadingInspections.includes(inspection?.id || '');
 
   if (!inspection) {
@@ -350,6 +355,18 @@ export default function InspectionDetailsScreen() {
     );
   };
 
+  const handleRenameInspection = async (newName: string) => {
+    try {
+      console.log('Переименовываем осмотр:', inspection.id, 'в', newName);
+      await renameInspection(inspection.id, newName);
+      setIsRenameModalVisible(false);
+      // Автоматически закроется модальное окно
+    } catch (error) {
+      console.error('Ошибка переименования:', error);
+      Alert.alert('Ошибка', 'Не удалось переименовать осмотр');
+    }
+  };
+
   const isActive = inspection.status === 'active';
   const isCompleted = inspection.status === 'completed';
 
@@ -361,19 +378,32 @@ export default function InspectionDetailsScreen() {
             <Text style={styles.carName}>
               {inspection.carBrand || inspection.carModel}
             </Text>
-            {isActive && (
-              <View style={styles.statusBadge}>
-                <View style={styles.statusIndicator} />
-                <Text style={styles.statusText}>Активный</Text>
+             <View style={styles.headerActions}>
+                {/* Кнопка редактирования - только для активных осмотров */}
+                {isActive && (
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() => setIsRenameModalVisible(true)}
+                  >
+                    <Text style={styles.editButtonText}>Редакт.</Text>
+                  </TouchableOpacity>
+                )}
+                
+                {isActive && (
+                  <View style={styles.statusBadge}>
+                    <View style={styles.statusIndicator} />
+                    <Text style={styles.statusText}>Активный</Text>
+                  </View>
+                )}
+                
+                {isCompleted && (
+                  <View style={styles.statusBadgeCompleted}>
+                    <CheckCircle2 size={14} color="#34C759" strokeWidth={2.5} />
+                    <Text style={styles.statusTextCompleted}>Завершен</Text>
+                  </View>
+                )}
               </View>
-            )}
-            {isCompleted && (
-              <View style={styles.statusBadgeCompleted}>
-                <CheckCircle2 size={14} color="#34C759" strokeWidth={2.5} />
-                <Text style={styles.statusTextCompleted}>Завершен</Text>
-              </View>
-            )}
-          </View>
+            </View>
 
           <View style={styles.infoRow}>
             <Clock size={16} color="#8E8E93" strokeWidth={2} />
@@ -554,6 +584,13 @@ export default function InspectionDetailsScreen() {
           )}
         </View>
       </View>
+      {/* Модальное окно переименования */}
+          <RenameModal
+            visible={isRenameModalVisible}
+            currentName={inspection.carBrand || inspection.carModel || ''}
+            onClose={() => setIsRenameModalVisible(false)}
+            onSave={handleRenameInspection}
+          />
     </SafeAreaView>
   );
 }
@@ -855,4 +892,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FF3B30',
   },
+  headerActions: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+},
+editButton: {
+  paddingHorizontal: 12,
+  paddingVertical: 6,
+  backgroundColor: '#F2F2F7',
+  borderRadius: 8,
+},
+editButtonText: {
+  fontSize: 13,
+  fontWeight: '600',
+  color: '#007AFF',
+},
 });

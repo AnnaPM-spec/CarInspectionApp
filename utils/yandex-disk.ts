@@ -93,6 +93,7 @@ export const createFolder = async (
   
   console.log(`Все папки в пути ${folderPath} готовы`);
 };
+
 export const uploadFile = async (
   accessToken: string,
   filePath: string,
@@ -122,26 +123,38 @@ export const uploadFile = async (
     const { href } = await uploadResponse.json();
     console.log(`✅ Получена ссылка для загрузки: ${href.substring(0, 50)}...`);
 
-    // 2. Читаем файл с устройства (НОВЫЙ СПОСОБ)
+    // 2. Читаем файл через expo-file-system (ПРАВИЛЬНЫЙ СПОСОБ)
     console.log(`📥 Читаем локальный файл...`);
-    
-    // Способ 1: Используем fetch для чтения файла
-    const fileResponse = await fetch(localUri);
-    if (!fileResponse.ok) {
-      throw new Error(`Не удалось прочитать локальный файл: ${fileResponse.status}`);
+
+    // СПОСОБ 1: Если EncodingType доступен
+    let fileContent: string;
+    try {
+      // Пробуем прочитать как base64 (используем строку 'base64' вместо EncodingType.Base64)
+      fileContent = await FileSystem.readAsStringAsync(localUri, {
+        encoding: 'base64' as any, // Используем строку вместо enum
+      });
+    } catch (readError) {
+      console.error('❌ Ошибка чтения файла:', readError);
+      throw new Error('Не удалось прочитать файл');
     }
     
-    const blob = await fileResponse.blob();
-    console.log(`📥 Размер файла: ${blob.size} байт, тип: ${blob.type}`);
+    // 3. Конвертируем base64 в ArrayBuffer
+    const base64Data = fileContent;
+    const byteCharacters = atob(base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
     
-    // 3. Загружаем файл на Яндекс.Диск
+    // 4. Загружаем файл на Яндекс.Диск
     console.log(`🔼 Загружаем файл на Яндекс.Диск...`);
     const uploadResult = await fetch(href, {
       method: 'PUT',
-      body: blob,
+      body: byteArray,
       headers: {
-        'Content-Type': blob.type || 'application/octet-stream',
-        'Content-Length': blob.size.toString(),
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': byteArray.length.toString(),
       },
     });
 
@@ -155,6 +168,68 @@ export const uploadFile = async (
     console.log(`✅ Файл ${filePath} успешно загружен`);
   } catch (error) {
     console.error(`❌ Критическая ошибка загрузки файла ${filePath}:`, error);
+    throw error;
+  }
+};
+
+// Альтернативная версия uploadFile с определением типа файла
+export const uploadFileWithMimeType = async (
+  accessToken: string,
+  filePath: string,
+  localUri: string,
+  mimeType: string = 'application/octet-stream'
+): Promise<void> => {
+  try {
+    console.log(`🔄 Начинаем загрузку файла: ${filePath}`);
+    
+    // 1. Получаем ссылку для загрузки
+    const uploadResponse = await fetch(
+      `https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(filePath)}&overwrite=false`,
+      {
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+          'Accept': 'application/json'
+        },
+      }
+    );
+
+    if (!uploadResponse.ok) {
+      const error = await uploadResponse.json();
+      throw new Error(`Failed to get upload link: ${JSON.stringify(error)}`);
+    }
+
+    const { href } = await uploadResponse.json();
+
+    // 2. Читаем файл через expo-file-system
+    const fileContent = await FileSystem.readAsStringAsync(localUri, {
+      encoding: 'base64' as any,
+    });
+    
+    // 3. Конвертируем base64 в ArrayBuffer
+    const byteCharacters = atob(fileContent);
+    const byteArray = new Uint8Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteArray[i] = byteCharacters.charCodeAt(i);
+    }
+    
+    // 4. Загружаем файл
+    const uploadResult = await fetch(href, {
+      method: 'PUT',
+      body: byteArray,
+      headers: {
+        'Content-Type': mimeType,
+        'Content-Length': byteArray.length.toString(),
+      },
+    });
+
+    if (!uploadResult.ok) {
+      const errorText = await uploadResult.text();
+      throw new Error(`Upload failed: ${uploadResult.status} - ${errorText}`);
+    }
+    
+    console.log(`✅ Файл успешно загружен`);
+  } catch (error) {
+    console.error('Error uploading file:', error);
     throw error;
   }
 };
@@ -213,6 +288,7 @@ export const formatFolderName = (inspectionName: string, timestamp: number): str
 
   return `${year}-${month}-${day}_${hours}-${minutes}_${finalName}`;
 };
+
 // Функция для проверки пути
 export const checkPathExists = async (
   accessToken: string,

@@ -20,6 +20,7 @@ interface InspectionContextType {
   updateInspectionStatus: (inspectionId: string, status: Inspection['status']) => void;
   deleteInspection: (inspectionId: string) => void;
   deleteSelectedInspections: () => void;
+  renameInspection: (inspectionId: string, newName: string) => void;
   saveYandexAuth: (auth: YandexDiskAuth) => Promise<void>;
   clearYandexAuth: () => Promise<void>;
   startUpload: (inspectionId: string) => void;
@@ -148,7 +149,6 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     console.log(`Удалено ${selectedInspections.length} осмотров`);
   }, [inspections, selectedInspections, uploadingInspections]);
 
-  // СУЩЕСТВУЮЩИЕ ФУНКЦИИ (без изменений)
   const createInspection = useCallback((carBrand: string, carModel: string): Inspection => {
     const newInspection: Inspection = {
       id: Date.now().toString(),
@@ -216,6 +216,23 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     saveInspections(updated);
   }, [inspections]);
 
+  // Добавьте эту функцию вместе с другими useCallback
+const renameInspection = useCallback((inspectionId: string, newName: string) => {
+  console.log('🔄 Переименовываем осмотр', inspectionId, 'в', newName);
+  
+  const updated = inspections.map(inspection => {
+    if (inspection.id === inspectionId) {
+      return {
+        ...inspection,
+        carBrand: newName,
+      };
+    }
+    return inspection;
+  });
+  
+  saveInspections(updated);
+  console.log('✅ Осмотр переименован');
+}, [inspections]);
   const deleteInspection = useCallback((inspectionId: string) => {
     const updated = inspections.filter(i => i.id !== inspectionId);
     
@@ -289,6 +306,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     updateInspectionStatus,
     deleteInspection,
     deleteSelectedInspections,
+    renameInspection,
     saveYandexAuth,
     clearYandexAuth,
     startUpload,

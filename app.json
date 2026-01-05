@@ -86,8 +86,7 @@
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone"
         }
       ],
-      "expo-video",
-      "expo-clipboard"  
+      "expo-video"  
     ],
     "experiments": {
       "typedRoutes": true
