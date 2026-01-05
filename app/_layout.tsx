@@ -5,6 +5,7 @@ import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { InspectionProvider } from "../context/InspectionContext";
+import Toast from 'react-native-toast-message';
 
 
 SplashScreen.preventAutoHideAsync();
@@ -41,6 +42,7 @@ export default function RootLayout() {
       <InspectionProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <RootLayoutNav />
+            <Toast />
         </GestureHandlerRootView>
       </InspectionProvider>
     </QueryClientProvider>

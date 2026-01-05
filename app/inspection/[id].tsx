@@ -38,6 +38,7 @@ import {
 } from '../../utils/yandex-disk';
 import { RenameModal } from '../components/RenameModal';
 import { checkConnectionWithAlert } from '../../utils/network';
+import Toast from 'react-native-toast-message';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
@@ -90,6 +91,7 @@ export default function InspectionDetailsScreen() {
     Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
     return;
   }
+       // 1. Проверка интернета
       console.log('📶 Проверяем интернет-соединение...');
       const hasInternet = await checkConnectionWithAlert();
       
@@ -105,26 +107,11 @@ export default function InspectionDetailsScreen() {
       }
       
       console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
-      console.log('🔑 Проверяем access token...');
-      try {
-        const checkToken = await fetch('https://cloud-api.yandex.net/v1/disk/', {
-          headers: { Authorization: `OAuth ${yandexAuth.accessToken}` },
-        });
-        
-        if (!checkToken.ok) {
-          const error = await checkToken.json();
-          console.error('❌ Токен невалиден:', error);
-          Alert.alert('Ошибка авторизации', 'Токен Яндекс.Диск недействителен');
-          return;
-        }
-        
-        const diskInfo = await checkToken.json();
-        console.log('✅ Токен валиден, информация о диске:', diskInfo);
-      } catch (tokenError) {
-        console.error('❌ Ошибка проверки токена:', tokenError);
-        Alert.alert('Ошибка', 'Не удалось проверить авторизацию Яндекс.Диск');
-        return;
-      }
+
+      // 2. НЕ проверяем токен - пусть Яндекс сам вернет ошибку при загрузке
+      console.log('🔑 Используем токен для загрузки...');
+
+      // 3. Начинаем загрузку
   try {
     startUpload(inspection.id);
     const totalMedia = inspection.photos.length + inspection.videos.length;
@@ -256,49 +243,39 @@ export default function InspectionDetailsScreen() {
 
   const handleShareLink = async () => {
   if (!inspection.yandexDiskFolderUrl) {
-    console.log('⚠️ Нет ссылки для копирования');
+    Toast.show({
+      type: 'error',
+      text1: 'Нет ссылки',
+      text2: 'Ссылка на Яндекс.Диск не найдена',
+      position: 'bottom',
+      visibilityTime: 2000,
+    });
     return;
   }
 
   const url = inspection.yandexDiskFolderUrl;
-  console.log('🔗 Копируем ссылку:', url);
-  console.log('📱 Платформа:', Platform.OS);
 
   try {
-    // 1. Проверяем, доступен ли Clipboard
-    if (!Clipboard || typeof Clipboard.setStringAsync !== 'function') {
-      throw new Error('Clipboard API недоступен');
-    }
-
-    // 2. Пробуем скопировать
-    console.log('🔄 Пытаемся скопировать через expo-clipboard...');
     await Clipboard.setStringAsync(url);
-    console.log('✅ Ссылка скопирована через expo-clipboard');
     
-    Alert.alert('Скопировано', 'Ссылка скопирована в буфер обмена');
+    Toast.show({
+      type: 'success',
+      text1: '✅ Скопировано!',
+      text2: 'Ссылка в буфере обмена',
+      position: 'bottom',
+      visibilityTime: 2000,
+    });
     
-  } catch (error: any) {
-    console.error('❌ Ошибка expo-clipboard:', error?.message || error);
+  } catch (error) {
+    console.error('Ошибка копирования:', error);
     
-    // Fallback: показываем ссылку
-    Alert.alert(
-      'Скопируйте ссылку',
-      url,
-      [
-        { 
-          text: 'OK', 
-          style: 'default',
-          onPress: () => {
-            // Дополнительно: можно попробовать другой метод
-            if (Platform.OS === 'web' && navigator.clipboard) {
-              navigator.clipboard.writeText(url)
-                .then(() => console.log('Скопировано через Web API'))
-                .catch(e => console.log('Web API тоже не сработал:', e));
-            }
-          }
-        }
-      ]
-    );
+    Toast.show({
+      type: 'error',
+      text1: '❌ Не удалось',
+      text2: 'Попробуйте еще раз',
+      position: 'bottom',
+      visibilityTime: 2000,
+    });
   }
 };
 
