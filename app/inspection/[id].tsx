@@ -39,11 +39,16 @@ import {
 import { RenameModal } from '../components/RenameModal';
 import { checkConnectionWithAlert } from '../../utils/network';
 import Toast from 'react-native-toast-message';
+import { useErrorHandler } from '../../hooks/useErrorHandler';
+import { ApplicationError, ErrorType } from '../../utils/errorHandler';
+import ErrorDisplay from '../components/ErrorDisplay';
+import type { AppError } from '../../utils/errorHandler';
 
 const { width } = Dimensions.get('window');
 const PHOTO_SIZE = (width - 60) / 3;
 
 export default function InspectionDetailsScreen() {
+  const [displayError, setDisplayError] = useState<AppError | null>(null);
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { 
@@ -58,6 +63,23 @@ export default function InspectionDetailsScreen() {
         finishUpload,
         cancelUpload
       } = useInspections(); 
+
+  const { handleOperation, isLoading: isErrorHandlerLoading } = useErrorHandler();
+  // Функция для отображения ошибки
+  const showError = (error: AppError) => {
+    setDisplayError(error);
+  };
+  
+  // Функция для скрытия ошибки
+  const dismissError = () => {
+    setDisplayError(null);
+  };
+  
+  // Функция для повтора операции (например, загрузки)
+  const retryUpload = () => {
+    setDisplayError(null);
+    uploadToYandexDisk();
+  };
   const inspection = inspections.find(i => i.id === id);
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number }>({
   current: 0,
@@ -71,7 +93,7 @@ export default function InspectionDetailsScreen() {
   if (!inspection) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
+        <View style={styles.fullScreenErrorContainer}>
           <Text style={styles.errorText}>Осмотр не найден</Text>
         </View>
       </SafeAreaView>
@@ -86,197 +108,259 @@ export default function InspectionDetailsScreen() {
     router.push(`/camera?inspectionId=${inspection.id}`);
   };
 
-  const uploadToYandexDisk = async () => {
-  if (!yandexAuth) {
-    Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
-    return;
-  }
-       // 1. Проверка интернета
-      console.log('📶 Проверяем интернет-соединение...');
-      const hasInternet = await checkConnectionWithAlert();
-      
-      if (!hasInternet) {
-        Alert.alert(
-          'Нет соединения',
-          'Проверьте подключение к интернету. Загрузка файлов на Яндекс.Диск невозможна без интернета.',
-          [
-            { text: 'Понятно', style: 'cancel' }
-          ]
-        );
-        return;
-      }
-      
-      console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
-
-      // 2. НЕ проверяем токен - пусть Яндекс сам вернет ошибку при загрузке
-      console.log('🔑 Используем токен для загрузки...');
-
-      // 3. Начинаем загрузку
-  try {
-    startUpload(inspection.id);
-    const totalMedia = inspection.photos.length + inspection.videos.length;
-    setUploadProgress({ current: 0, total: totalMedia });
-    updateInspectionStatus(inspection.id, 'uploading');
-
-    const folderName = formatFolderName(
-      inspection.carBrand || inspection.carModel || 'Осмотр',
-      inspection.startTime
-    );
-    const folderPath = `/Осмотры/${folderName}`;
-
-    console.log('🔧 ИСПОЛЬЗУЕМ ТЕСТОВОЕ ИМЯ ПАПКИ:', folderPath);
-
-    console.log('📁 ========= НАЧАЛО ЗАГРУЗКИ =========');
-    console.log('📁 Имя папки:', folderName);
-    console.log('📁 Полный путь:', folderPath);
-    console.log('📁 Access Token:', yandexAuth.accessToken ? 'Есть' : 'Нет');
-    console.log('📁 Количество файлов:', totalMedia);
-
-    if (Platform.OS === 'web') {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
-      completeInspection(inspection.id, demoUrl);
-      Alert.alert(
-        'Готово!',
-        'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
-        [{ text: 'OK' }]
-      );
-    } else {
-      // 1. Проверяем, существует ли папка Осмотры
-      console.log('1️⃣ Проверяем папку /Осмотры...');
-      await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
-      
-      // 2. Проверяем/создаем папку для осмотра
-      console.log('2️⃣ Проверяем папку для осмотра...');
-      await ensureFolderExists(yandexAuth.accessToken, folderPath);
-      
-      // 3. Ждем 1 секунду
-      console.log('3️⃣ Ждем 1 секунду...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // 4. ПРОВЕРКА: Существует ли папка на самом деле?
-      console.log('4️⃣ Пропускаем дополнительную проверку, т.к. папка уже создана');
-      
-      // 5. Загружаем фото
-      console.log(`5️⃣ Загружаем ${inspection.photos.length} фото...`);
-      for (let i = 0; i < inspection.photos.length; i++) {
-        const photo = inspection.photos[i];
-        const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
-        const filePath = `${folderPath}/${fileName}`;
-        
-        console.log(`   📸 Фото ${i + 1}: ${filePath}`);
-        console.log(`   📸 Локальный URI: ${photo.uri}`);
-        
-        try {
-          console.log(`   📸 Загружаем фото ${i + 1}...`);
-          await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
-          console.log(`   ✅ Фото ${i + 1} загружено`);
-        } catch (error: any) {
-          console.log(`   ❌ Ошибка загрузки фото ${i + 1}:`, error.message);
-
-          // Продолжаем с другими файлами
-        }
-        
-        setUploadProgress(prev => ({
-          ...prev,
-          current: prev.current + 1
-        }));
-      }
-
-      // 6. Загружаем видео (если есть)
-      if (inspection.videos.length > 0) {
-        console.log(`6️⃣ Загружаем ${inspection.videos.length} видео...`);
-        for (let i = 0; i < inspection.videos.length; i++) {
-          const video = inspection.videos[i];
-          const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
-          const filePath = `${folderPath}/${fileName}`;
-
-          console.log(`   🎥 Видео ${i + 1}: ${filePath}`);
-          
-          try {
-            await uploadFile(yandexAuth.accessToken, filePath, video.uri);
-            console.log(`   ✅ Видео ${i + 1} загружено`);
-          } catch (error: any) {
-            console.log(`   ❌ Ошибка загрузки видео ${i + 1}:`, error.message);
-            // Продолжаем с другими файлами
-          }
-          
-          setUploadProgress(prev => ({
-            ...prev,
-            current: prev.current + 1
-          }));
-        }
-      }
-
-      // 7. Публикуем папку
-      console.log('7️⃣ Публикуем папку...');
-      try {
-        const publicUrl = await publishFolder(yandexAuth, folderPath);
-        console.log('✅ Публичная ссылка получена:', publicUrl);
-        
-        // 8. Помечаем осмотр как завершённый
-        completeInspection(inspection.id, publicUrl);
-        
-        Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
-      } catch (publishError: any) {
-        console.error('❌ Ошибка публикации:', publishError);
-        // Даже если публикация не удалась, осмотр все равно завершаем
-        completeInspection(inspection.id, '');
-        Alert.alert('Частично успешно', 'Файлы загружены, но не удалось получить публичную ссылку');
-      }
+   const uploadToYandexDisk = async () => {
+    if (!yandexAuth) {
+      Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
+      return;
     }
 
-    console.log('========= ЗАВЕРШЕНИЕ ЗАГРУЗКИ =========');
-    router.replace('/');
-  } catch (error: any) {
-    console.error('❌ КРИТИЧЕСКАЯ ОШИБКА ЗАГРУЗКИ:');
-    console.error('Сообщение:', error.message);
-    console.error('Стек:', error.stack);
-    
-    updateInspectionStatus(inspection.id, 'active');
-    Alert.alert('Ошибка', `Не удалось загрузить файлы на Яндекс Диск: ${error.message || 'Неизвестная ошибка'}`);
-  } finally {
-    finishUpload(inspection.id);
-    setUploadProgress({ current: 0, total: 0 });
-  }
-};
+    // Используем handleOperation для обработки всей загрузки с автоматической обработкой ошибок
+    await handleOperation(
+      async () => {
+        // 1. Проверка интернета
+        console.log('📶 Проверяем интернет-соединение...');
+        const hasInternet = await checkConnectionWithAlert();
+        
+        if (!hasInternet) {
+          throw new ApplicationError(
+            ErrorType.NETWORK,
+            'Нет интернет-соединения для загрузки файлов'
+          );
+        }
+        
+        console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
+        
+        // 2. Начинаем загрузку
+        startUpload(inspection.id);
+        const totalMedia = inspection.photos.length + inspection.videos.length;
+        setUploadProgress({ current: 0, total: totalMedia });
+        updateInspectionStatus(inspection.id, 'uploading');
+
+        const folderName = formatFolderName(
+          inspection.carBrand || inspection.carModel || 'Осмотр',
+          inspection.startTime
+        );
+        const folderPath = `/Осмотры/${folderName}`;
+
+        console.log('📁 ========= НАЧАЛО ЗАГРУЗКИ =========');
+        console.log('📁 Имя папки:', folderName);
+        console.log('📁 Полный путь:', folderPath);
+        console.log('📁 Количество файлов:', totalMedia);
+
+        if (Platform.OS === 'web') {
+          // Демо-режим для веб
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
+          completeInspection(inspection.id, demoUrl);
+          return { success: true, url: demoUrl, isDemo: true };
+        } else {
+          // РЕАЛЬНАЯ ЗАГРУЗКА
+          
+          // 1. Создаем папки
+          console.log('1️⃣ Проверяем/создаем папки...');
+          await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
+          await ensureFolderExists(yandexAuth.accessToken, folderPath);
+          
+          // 2. Ждем 1 секунду
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // 3. Загружаем фото
+          console.log(`2️⃣ Загружаем ${inspection.photos.length} фото...`);
+          let uploadedPhotos = 0;
+          let photoErrors: string[] = [];
+          
+          for (let i = 0; i < inspection.photos.length; i++) {
+            const photo = inspection.photos[i];
+            const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
+            const filePath = `${folderPath}/${fileName}`;
+            
+            try {
+              await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
+              uploadedPhotos++;
+            } catch (error: any) {
+              console.warn(`❌ Ошибка загрузки фото ${i + 1}:`, error.message);
+              photoErrors.push(`Фото ${i + 1}: ${error.message}`);
+            }
+            
+            setUploadProgress(prev => ({
+              ...prev,
+              current: prev.current + 1
+            }));
+          }
+
+          // 4. Загружаем видео
+          let uploadedVideos = 0;
+          let videoErrors: string[] = [];
+          
+          if (inspection.videos.length > 0) {
+            console.log(`3️⃣ Загружаем ${inspection.videos.length} видео...`);
+            for (let i = 0; i < inspection.videos.length; i++) {
+              const video = inspection.videos[i];
+              const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
+              const filePath = `${folderPath}/${fileName}`;
+
+              try {
+                await uploadFile(yandexAuth.accessToken, filePath, video.uri);
+                uploadedVideos++;
+              } catch (error: any) {
+                console.warn(`❌ Ошибка загрузки видео ${i + 1}:`, error.message);
+                videoErrors.push(`Видео ${i + 1}: ${error.message}`);
+              }
+              
+              setUploadProgress(prev => ({
+                ...prev,
+                current: prev.current + 1
+              }));
+            }
+          }
+
+          // 5. Проверяем, загружено ли что-то
+          if (uploadedPhotos === 0 && uploadedVideos === 0) {
+            throw new ApplicationError(
+              ErrorType.UPLOAD,
+              'Не удалось загрузить ни одного файла',
+              { photoErrors, videoErrors }
+            );
+          }
+
+          // 6. Публикуем папку
+          console.log('4️⃣ Публикуем папку...');
+          try {
+            const publicUrl = await publishFolder(yandexAuth, folderPath);
+            console.log('✅ Публичная ссылка получена:', publicUrl);
+            
+            // 7. Помечаем осмотр как завершённый
+            completeInspection(inspection.id, publicUrl);
+            
+            return { 
+              success: true, 
+              url: publicUrl, 
+              isDemo: false,
+              stats: {
+                totalPhotos: inspection.photos.length,
+                uploadedPhotos,
+                totalVideos: inspection.videos.length,
+                uploadedVideos,
+                photoErrors,
+                videoErrors
+              }
+            };
+          } catch (publishError: any) {
+            console.error('❌ Ошибка публикации:', publishError);
+            
+            // Даже если публикация не удалась, осмотр все равно завершаем
+            completeInspection(inspection.id, '');
+            
+            throw new ApplicationError(
+              ErrorType.UPLOAD,
+              'Файлы загружены, но не удалось получить публичную ссылку',
+              publishError
+            );
+          }
+        }
+      },
+      'uploadToYandexDisk', // Контекст для логов
+      (result) => {
+        // Успешная загрузка
+        console.log('✅ Загрузка завершена успешно:', result);
+        
+        if (result.isDemo) {
+          Alert.alert(
+            'Готово!',
+            'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
+            [{ text: 'OK' }]
+          );
+        } else {
+          // Проверяем, были ли частичные ошибки
+          if (result.stats && 
+              (result.stats.photoErrors.length > 0 || result.stats.videoErrors.length > 0)) {
+            
+            const errorCount = result.stats.photoErrors.length + result.stats.videoErrors.length;
+            const successCount = result.stats.uploadedPhotos + result.stats.uploadedVideos;
+            
+            Alert.alert(
+              'Частично успешно',
+              `Загружено ${successCount} из ${result.stats.totalPhotos + result.stats.totalVideos} файлов\n` +
+              `(${errorCount} файлов не загружено)`,
+              [{ text: 'OK' }]
+            );
+          } else {
+            Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
+          }
+        }
+        
+        // Переходим на главный экран
+        router.replace('/');
+      },
+      (error) => {
+        // Кастомная обработка ошибки (вызывается при ошибке)
+        console.error('❌ Ошибка загрузки через handler:', error);
+        
+        // Показываем ошибку в ErrorDisplay
+        showError(error);
+
+        // Сбрасываем статус загрузки
+        updateInspectionStatus(inspection.id, 'active');
+        finishUpload(inspection.id);
+        setUploadProgress({ current: 0, total: 0 });
+        
+        // Дополнительные действия для специфических ошибок
+        if (error.type === ErrorType.AUTH) {
+          // Если ошибка авторизации, предлагаем переподключиться
+          Alert.alert(
+            'Ошибка авторизации',
+            'Необходимо заново подключить Яндекс.Диск',
+            [
+              { text: 'Отмена', style: 'cancel' },
+              { 
+                text: 'Подключить', 
+                onPress: () => router.push('/auth') 
+              }
+            ]
+          );
+        }
+      }
+    );
+  };
 
   const handleShareLink = async () => {
-  if (!inspection.yandexDiskFolderUrl) {
-    Toast.show({
-      type: 'error',
-      text1: 'Нет ссылки',
-      text2: 'Ссылка на Яндекс.Диск не найдена',
-      position: 'bottom',
-      visibilityTime: 2000,
-    });
+  // Проверяем, что ссылка существует
+  if (!inspection?.yandexDiskFolderUrl) {
+    Alert.alert('Ошибка', 'Ссылка на Яндекс.Диск не найдена');
     return;
   }
 
   const url = inspection.yandexDiskFolderUrl;
 
-  try {
-    await Clipboard.setStringAsync(url);
-    
-    Toast.show({
-      type: 'success',
-      text1: '✅ Скопировано!',
-      text2: 'Ссылка в буфере обмена',
-      position: 'bottom',
-      visibilityTime: 2000,
-    });
-    
-  } catch (error) {
-    console.error('Ошибка копирования:', error);
-    
-    Toast.show({
-      type: 'error',
-      text1: '❌ Не удалось',
-      text2: 'Попробуйте еще раз',
-      position: 'bottom',
-      visibilityTime: 2000,
-    });
-  }
+  await handleOperation(
+    async () => {
+      await Clipboard.setStringAsync(url);
+      return { success: true, url };
+    },
+    'copyToClipboard',
+    (result) => {
+      // Успех обрабатывается через Toast
+      Toast.show({
+        type: 'success',
+        text1: '✅ Скопировано!',
+        text2: 'Ссылка в буфере обмена',
+        position: 'bottom',
+        visibilityTime: 2000,
+      });
+      console.log('✅ Ссылка скопирована:', result.url);
+    },
+    (error) => {
+      // Ошибка копирования
+      console.error('❌ Ошибка копирования:', error);
+      
+      // Fallback: показываем ссылку в Alert
+      Alert.alert(
+        'Скопируйте ссылку',
+        url,
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
+  );
 };
 
   const handleOpenLink = async () => {
@@ -349,16 +433,23 @@ export default function InspectionDetailsScreen() {
   };
 
   const handleRenameInspection = async (newName: string) => {
-    try {
+  await handleOperation(
+    async () => {
       console.log('Переименовываем осмотр:', inspection.id, 'в', newName);
       await renameInspection(inspection.id, newName);
+      return { success: true, newName };
+    },
+    'renameInspection',
+    (result) => {
       setIsRenameModalVisible(false);
-      // Автоматически закроется модальное окно
-    } catch (error) {
-      console.error('Ошибка переименования:', error);
+      console.log('✅ Осмотр переименован:', result.newName);
+    },
+    (error) => {
+      console.error('❌ Ошибка переименования:', error);
       Alert.alert('Ошибка', 'Не удалось переименовать осмотр');
     }
-  };
+  );
+};
 
   const isActive = inspection.status === 'active';
   const isCompleted = inspection.status === 'completed';
@@ -371,6 +462,13 @@ export default function InspectionDetailsScreen() {
             <Text style={styles.carName}>
               {inspection.carBrand || inspection.carModel}
             </Text>
+              {displayError && (
+              <ErrorDisplay
+                error={displayError}
+                onRetry={retryUpload}
+                onDismiss={dismissError}
+              />
+            )}
              <View style={styles.headerActions}>
                 {/* Кнопка редактирования - только для активных осмотров */}
                 {isActive && (
@@ -899,4 +997,17 @@ editButtonText: {
   fontWeight: '600',
   color: '#007AFF',
 },
+fullScreenErrorContainer: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  
+  overlayError: {
+    position: 'absolute',
+    top: 20,
+    left: 16,
+    right: 16,
+    zIndex: 1000,
+  },
 });
