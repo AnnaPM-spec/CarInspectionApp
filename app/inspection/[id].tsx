@@ -23,7 +23,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-//import * as Clipboard from 'expo-clipboard';
+import * as Clipboard from 'expo-clipboard';
 import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import { Photo, Video as InspectionVideo } from '../../types/inspections';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -234,23 +234,51 @@ export default function InspectionDetailsScreen() {
 };
 
   const handleShareLink = async () => {
-  if (!inspection.yandexDiskFolderUrl) return;
+  if (!inspection.yandexDiskFolderUrl) {
+    console.log('⚠️ Нет ссылки для копирования');
+    return;
+  }
 
-  // Временное решение без expo-clipboard
-  Alert.alert(
-    'Ссылка на Яндекс.Диск',
-    inspection.yandexDiskFolderUrl,
-    [
-      { 
-        text: 'Скопировать', 
-        onPress: () => {
-          // Просто показываем ссылку, копирование временно отключено
-          Alert.alert('Скопировано', 'Ссылка показана выше');
+  const url = inspection.yandexDiskFolderUrl;
+  console.log('🔗 Копируем ссылку:', url);
+  console.log('📱 Платформа:', Platform.OS);
+
+  try {
+    // 1. Проверяем, доступен ли Clipboard
+    if (!Clipboard || typeof Clipboard.setStringAsync !== 'function') {
+      throw new Error('Clipboard API недоступен');
+    }
+
+    // 2. Пробуем скопировать
+    console.log('🔄 Пытаемся скопировать через expo-clipboard...');
+    await Clipboard.setStringAsync(url);
+    console.log('✅ Ссылка скопирована через expo-clipboard');
+    
+    Alert.alert('Скопировано', 'Ссылка скопирована в буфер обмена');
+    
+  } catch (error: any) {
+    console.error('❌ Ошибка expo-clipboard:', error?.message || error);
+    
+    // Fallback: показываем ссылку
+    Alert.alert(
+      'Скопируйте ссылку',
+      url,
+      [
+        { 
+          text: 'OK', 
+          style: 'default',
+          onPress: () => {
+            // Дополнительно: можно попробовать другой метод
+            if (Platform.OS === 'web' && navigator.clipboard) {
+              navigator.clipboard.writeText(url)
+                .then(() => console.log('Скопировано через Web API'))
+                .catch(e => console.log('Web API тоже не сработал:', e));
+            }
+          }
         }
-      },
-      { text: 'OK', style: 'cancel' }
-    ]
-  );
+      ]
+    );
+  }
 };
 
   const handleOpenLink = async () => {
