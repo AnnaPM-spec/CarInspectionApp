@@ -9,7 +9,7 @@ import {
   CheckCircle2,
   PlayCircle,
 } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,7 @@ import {
   Linking,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { Video as ExpoVideo, ResizeMode } from 'expo-av';
+import { VideoView, createVideoPlayer } from 'expo-video';
 import { Photo, Video as InspectionVideo } from '../../types/inspections';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../../context/InspectionContext';
@@ -65,6 +65,7 @@ export default function InspectionDetailsScreen() {
       } = useInspections(); 
 
   const { handleOperation, isLoading: isErrorHandlerLoading } = useErrorHandler();
+
   // Функция для отображения ошибки
   const showError = (error: AppError) => {
     setDisplayError(error);
@@ -80,7 +81,10 @@ export default function InspectionDetailsScreen() {
     setDisplayError(null);
     uploadToYandexDisk();
   };
+
   const inspection = inspections.find(i => i.id === id);
+
+  
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number }>({
   current: 0,
   total: 0,
@@ -89,6 +93,31 @@ export default function InspectionDetailsScreen() {
   const [isRenameModalVisible, setIsRenameModalVisible] = useState(false);
 
   const isUploading = uploadingInspections.includes(inspection?.id || '');
+
+  const videoPlayers = useMemo(() => {
+    console.log('Creating video players for:', inspection?.videos.length, 'videos');
+    if (!inspection?.videos) return [];
+    
+    return inspection.videos.map(video => {
+      try {
+        const player = createVideoPlayer(video.uri);
+        player.loop = false;
+        player.volume = 1.0;
+        // Не начинаем воспроизведение автоматически
+        return player;
+      } catch (error) {
+        console.error('Failed to create video player:', error);
+        return null;
+      }
+    }).filter(Boolean); // Убираем null
+  }, [inspection?.videos]); // Зависимость только от videos
+
+      useEffect(() => {
+      return () => {
+        console.log('Cleaning up', videoPlayers.length, 'video players');
+        videoPlayers.forEach(player => player?.pause());
+      };
+    }, [videoPlayers]);
 
   if (!inspection) {
     return (
@@ -509,18 +538,18 @@ export default function InspectionDetailsScreen() {
             </Text>
           </View>
 
-          <View style={styles.mediaCountRow}>
-            {inspection.photos.length > 0 && (
-              <Text style={styles.photoCount}>
-                {inspection.photos.length} фото
-              </Text>
-            )}
-            {inspection.videos.length > 0 && (
-              <Text style={styles.videoCount}>
-                {inspection.videos.length} видео
-              </Text>
-            )}
-          </View>
+            <View style={styles.mediaCountRow}>
+              {inspection.photos.length > 0 && (
+                <Text style={styles.photoCount}>
+                  {inspection.photos.length} фото
+                </Text>
+              )}
+              {inspection.videos.length > 0 && (
+                <Text style={styles.videoCount}>
+                  {inspection.videos.length} видео
+                </Text>
+              )}
+            </View>
         </View>
 
         {inspection.photos.length > 0 || inspection.videos.length > 0 ? (
@@ -537,28 +566,38 @@ export default function InspectionDetailsScreen() {
                 </View>
               </View>
             )}
-            
             {inspection.videos.length > 0 && (
-              <View>
-                <Text style={styles.sectionTitle}>Видео ({inspection.videos.length})</Text>
-                <View style={styles.videoGrid}>
-                  {inspection.videos.map((video: InspectionVideo) => (
-                    <View key={video.id} style={styles.videoContainer}>
-                      <ExpoVideo
-                        source={{ uri: video.uri }}
-                        style={styles.video}
-                        useNativeControls
-                        isLooping={false}
-                        shouldPlay={false}
-                      />
-                      <View style={styles.videoOverlay}>
-                        <PlayCircle size={48} color="#FFF" strokeWidth={2} />
-                      </View>
-                    </View>
-                  ))}
+        <View>
+          <Text style={styles.sectionTitle}>Видео ({inspection.videos.length})</Text>
+          <View style={styles.videoGrid}>
+            {inspection.videos.map((video: InspectionVideo, index: number) => {
+              const player = videoPlayers[index];
+              
+              if (!player) {
+                return (
+                  <View key={video.id} style={[styles.videoContainer, { justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ color: '#fff' }}>Ошибка загрузки видео</Text>
+                  </View>
+                );
+              }
+
+              return (
+                <View key={video.id} style={styles.videoContainer}>
+                  <VideoView
+                    player={player}
+                    style={styles.video}
+                    nativeControls
+                    contentFit="contain"
+                  />
+                  <View style={styles.videoOverlay}>
+                    <PlayCircle size={48} color="#FFF" strokeWidth={2} />
+                  </View>
                 </View>
-              </View>
-            )}
+              );
+            })}
+          </View>
+        </View>
+      )}
           </View>
         ) : (
           <View style={styles.emptyState}>
