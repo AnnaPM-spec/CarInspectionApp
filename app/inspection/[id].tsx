@@ -92,7 +92,7 @@ export default function InspectionDetailsScreen() {
 
   const [isRenameModalVisible, setIsRenameModalVisible] = useState(false);
 
-  const isUploading = uploadingInspections.includes(inspection?.id || '');
+  //const isUploading = uploadingInspections.includes(inspection?.id || '');
 
   const videoPlayers = useMemo(() => {
     console.log('Creating video players for:', inspection?.videos.length, 'videos');
@@ -615,7 +615,7 @@ export default function InspectionDetailsScreen() {
           <View style={styles.actionsContainer}>
             
             {/* ПРОГРЕСС-БАР (занимает всю ширину) */}
-            {isUploading && (
+            {inspection.status === 'uploading' && (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
                   <View 
@@ -647,13 +647,13 @@ export default function InspectionDetailsScreen() {
               <TouchableOpacity
                 style={[
                   styles.uploadButton,
-                  (isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)) &&
+                  (inspection.status === 'uploading' || (inspection.photos.length === 0 && inspection.videos.length === 0)) &&
                     styles.uploadButtonDisabled,
                 ]}
                 onPress={uploadToYandexDisk}
-                disabled={isUploading || (inspection.photos.length === 0 && inspection.videos.length === 0)}
+                disabled={inspection.status === 'uploading' || (inspection.photos.length === 0 && inspection.videos.length === 0)}
               >
-                {isUploading ? (
+                {inspection.status === 'uploading' ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
                   <>
@@ -691,19 +691,29 @@ export default function InspectionDetailsScreen() {
         )}
 
         <View style={styles.actionButtons}>
-          {/* КНОПКА ОТМЕНЫ ЗАГРУЗКИ (только при загрузке) */}
-          {isUploading && (
-            <TouchableOpacity 
-              style={[styles.actionButton, styles.cancelButton]}
-              onPress={handleCancelUpload}
-            >
-              <Trash2 size={18} color="#FF9500" strokeWidth={2} />
-              <Text style={styles.cancelButtonText}>Отменить загрузку</Text>
-            </TouchableOpacity>
-          )}
-          
-          {/* КНОПКА УДАЛЕНИЯ ОСМОТРА (всегда, кроме активной загрузки) */}
-          {!isUploading && (
+          {/* В момент загрузки показываем ОБЕ кнопки */}
+          {inspection.status === 'uploading' ? (
+            <>
+              {/* Кнопка отмены загрузки */}
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.cancelButton]}
+                onPress={handleCancelUpload}
+              >
+                <Trash2 size={18} color="#FF9500" strokeWidth={2} />
+                <Text style={styles.cancelButtonText}>Остановить загрузку</Text>
+              </TouchableOpacity>
+              
+              {/* Кнопка удаления осмотра (неактивная во время загрузки) */}
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.deleteButton, { opacity: 0.5 }]}
+                disabled={true}
+              >
+                <Trash2 size={18} color="#FF3B30" strokeWidth={2} />
+                <Text style={styles.deleteButtonText}>Удалить осмотр</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            //Когда НЕ загружается - только кнопка удаления 
             <TouchableOpacity 
               style={[styles.actionButton, styles.deleteButton]}
               onPress={handleDeleteInspection}
