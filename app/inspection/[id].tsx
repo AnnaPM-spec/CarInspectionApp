@@ -84,6 +84,9 @@ export default function InspectionDetailsScreen() {
 
   const inspection = inspections.find(i => i.id === id);
 
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+  const [cancelUploadFunction, setCancelUploadFunction] = useState<(() => void) | null>(null);
   
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number }>({
   current: 0,
@@ -119,6 +122,16 @@ export default function InspectionDetailsScreen() {
       };
     }, [videoPlayers]);
 
+  useEffect(() => {
+  return () => {
+    // При размонтировании компонента отменяем загрузку если она идет
+    if (abortController) {
+      console.log('🛑 Отменяем загрузку при размонтировании компонента');
+      abortController.abort();
+    }
+  };
+}, [abortController]);
+    
   if (!inspection) {
     return (
       <SafeAreaView style={styles.container}>
@@ -137,78 +150,158 @@ export default function InspectionDetailsScreen() {
     router.push(`/camera?inspectionId=${inspection.id}`);
   };
 
-   const uploadToYandexDisk = async () => {
-    if (!yandexAuth) {
-      Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
-      return;
-    }
+  const uploadToYandexDisk = async () => {
+  if (!yandexAuth) {
+    Alert.alert('Ошибка', 'Необходима авторизация Яндекс.Диск');
+    return;
+  }
 
-    // Используем handleOperation для обработки всей загрузки с автоматической обработкой ошибок
-    await handleOperation(
-      async () => {
-        // 1. Проверка интернета
-        console.log('📶 Проверяем интернет-соединение...');
-        const hasInternet = await checkConnectionWithAlert();
-        
-        if (!hasInternet) {
-          throw new ApplicationError(
-            ErrorType.NETWORK,
-            'Нет интернет-соединения для загрузки файлов'
-          );
+  // СОЗДАЕМ НОВЫЙ ABORT CONTROLLER
+  const controller = new AbortController();
+  const signal = controller.signal;
+  
+  // Сохраняем для возможности отмены
+  setAbortController(controller);
+
+  await handleOperation(
+    async () => {
+      // 1. Проверка интернета
+      console.log('📶 Проверяем интернет-соединение...');
+      const hasInternet = await checkConnectionWithAlert();
+      
+      if (!hasInternet) {
+        throw new ApplicationError(
+          ErrorType.NETWORK,
+          'Нет интернет-соединения для загрузки файлов'
+        );
+      }
+      
+      console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
+      
+      // Проверяем отмену перед началом
+      if (signal.aborted) {
+        throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+      }
+      
+      // 2. Начинаем загрузку
+      startUpload(inspection.id);
+      const totalMedia = inspection.photos.length + inspection.videos.length;
+      setUploadProgress({ current: 0, total: totalMedia });
+      updateInspectionStatus(inspection.id, 'uploading');
+
+      const folderName = formatFolderName(
+        inspection.carBrand || inspection.carModel || 'Осмотр',
+        inspection.startTime
+      );
+      const folderPath = `/Осмотры/${folderName}`;
+
+      console.log('📁 ========= НАЧАЛО ЗАГРУЗКИ =========');
+      console.log('📁 Имя папки:', folderName);
+      console.log('📁 Полный путь:', folderPath);
+      console.log('📁 Количество файлов:', totalMedia);
+
+      if (Platform.OS === 'web') {
+        // Демо-режим для веб
+        // Проверяем отмену
+        if (signal.aborted) {
+          throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
         }
         
-        console.log('✅ Интернет-соединение есть, продолжаем загрузку...');
+        await new Promise((resolve, reject) => {
+          // Добавляем обработчик отмены
+          signal.addEventListener('abort', () => {
+            reject(new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена'));
+          });
+          
+          setTimeout(resolve, 2000);
+        });
         
-        // 2. Начинаем загрузку
-        startUpload(inspection.id);
-        const totalMedia = inspection.photos.length + inspection.videos.length;
-        setUploadProgress({ current: 0, total: totalMedia });
-        updateInspectionStatus(inspection.id, 'uploading');
+        const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
+        completeInspection(inspection.id, demoUrl);
+        return { success: true, url: demoUrl, isDemo: true };
+      } else {
+        // РЕАЛЬНАЯ ЗАГРУЗКА
+        
+        // 1. Создаем папки с проверкой отмены
+        console.log('1️⃣ Проверяем/создаем папки...');
+        if (signal.aborted) {
+          throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+        }
+        
+        await ensureFolderExists(yandexAuth.accessToken, '/Осмотры', signal);
+        await ensureFolderExists(yandexAuth.accessToken, folderPath, signal);
+        
+        // 2. Ждем 1 секунду с проверкой отмены
+        await new Promise((resolve, reject) => {
+          if (signal.aborted) {
+            reject(new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена'));
+          }
+          setTimeout(resolve, 1000);
+        });
+        
+        // 3. Загружаем фото
+        console.log(`2️⃣ Загружаем ${inspection.photos.length} фото...`);
+        let uploadedPhotos = 0;
+        let photoErrors: string[] = [];
+        
+        for (let i = 0; i < inspection.photos.length; i++) {
+          // ПРОВЕРЯЕМ ОТМЕНУ ПЕРЕД КАЖДЫМ ФАЙЛОМ
+          if (signal.aborted) {
+            console.log('🛑 Загрузка отменена на фото', i + 1);
+            throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+          }
+          
+          const photo = inspection.photos[i];
+          const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
+          const filePath = `${folderPath}/${fileName}`;
+          
+          try {
+            // ПЕРЕДАЕМ SIGNAL В ФУНКЦИЮ ЗАГРУЗКИ
+            await uploadFile(yandexAuth.accessToken, filePath, photo.uri, signal);
+            uploadedPhotos++;
+          } catch (error: any) {
+            // Если ошибка из-за отмены
+            if (signal.aborted || error.message === 'Загрузка отменена') {
+              throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+            }
+            console.warn(`❌ Ошибка загрузки фото ${i + 1}:`, error.message);
+            photoErrors.push(`Фото ${i + 1}: ${error.message}`);
+          }
+          
+          setUploadProgress(prev => ({
+            ...prev,
+            current: prev.current + 1
+          }));
+        }
 
-        const folderName = formatFolderName(
-          inspection.carBrand || inspection.carModel || 'Осмотр',
-          inspection.startTime
-        );
-        const folderPath = `/Осмотры/${folderName}`;
-
-        console.log('📁 ========= НАЧАЛО ЗАГРУЗКИ =========');
-        console.log('📁 Имя папки:', folderName);
-        console.log('📁 Полный путь:', folderPath);
-        console.log('📁 Количество файлов:', totalMedia);
-
-        if (Platform.OS === 'web') {
-          // Демо-режим для веб
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const demoUrl = `https://disk.yandex.ru/d/demo_${inspection.id}`;
-          completeInspection(inspection.id, demoUrl);
-          return { success: true, url: demoUrl, isDemo: true };
-        } else {
-          // РЕАЛЬНАЯ ЗАГРУЗКА
-          
-          // 1. Создаем папки
-          console.log('1️⃣ Проверяем/создаем папки...');
-          await ensureFolderExists(yandexAuth.accessToken, '/Осмотры');
-          await ensureFolderExists(yandexAuth.accessToken, folderPath);
-          
-          // 2. Ждем 1 секунду
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // 3. Загружаем фото
-          console.log(`2️⃣ Загружаем ${inspection.photos.length} фото...`);
-          let uploadedPhotos = 0;
-          let photoErrors: string[] = [];
-          
-          for (let i = 0; i < inspection.photos.length; i++) {
-            const photo = inspection.photos[i];
-            const fileName = `photo_${String(i + 1).padStart(3, '0')}.jpg`;
-            const filePath = `${folderPath}/${fileName}`;
+        // 4. Загружаем видео
+        let uploadedVideos = 0;
+        let videoErrors: string[] = [];
+        
+        if (inspection.videos.length > 0) {
+          console.log(`3️⃣ Загружаем ${inspection.videos.length} видео...`);
+          for (let i = 0; i < inspection.videos.length; i++) {
+            // ПРОВЕРЯЕМ ОТМЕНУ ПЕРЕД КАЖДЫМ ФАЙЛОМ
+            if (signal.aborted) {
+              console.log('🛑 Загрузка отменена на видео', i + 1);
+              throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+            }
             
+            const video = inspection.videos[i];
+            const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
+            const filePath = `${folderPath}/${fileName}`;
+
             try {
-              await uploadFile(yandexAuth.accessToken, filePath, photo.uri);
-              uploadedPhotos++;
+              // ПЕРЕДАЕМ SIGNAL В ФУНКЦИЮ ЗАГРУЗКИ
+              await uploadFile(yandexAuth.accessToken, filePath, video.uri, signal);
+              uploadedVideos++;
             } catch (error: any) {
-              console.warn(`❌ Ошибка загрузки фото ${i + 1}:`, error.message);
-              photoErrors.push(`Фото ${i + 1}: ${error.message}`);
+              // Если ошибка из-за отмены
+              if (signal.aborted || error.message === 'Загрузка отменена') {
+                throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+              }
+              console.warn(`❌ Ошибка загрузки видео ${i + 1}:`, error.message);
+              videoErrors.push(`Видео ${i + 1}: ${error.message}`);
             }
             
             setUploadProgress(prev => ({
@@ -216,141 +309,123 @@ export default function InspectionDetailsScreen() {
               current: prev.current + 1
             }));
           }
+        }
 
-          // 4. Загружаем видео
-          let uploadedVideos = 0;
-          let videoErrors: string[] = [];
+        // 5. Публикуем папку только если не отменено
+        if (signal.aborted) {
+          throw new ApplicationError(ErrorType.UPLOAD, 'Загрузка отменена');
+        }
+        
+        console.log('4️⃣ Публикуем папку...');
+        try {
+          const publicUrl = await publishFolder(yandexAuth, folderPath, signal);
+          console.log('✅ Публичная ссылка получена:', publicUrl);
           
-          if (inspection.videos.length > 0) {
-            console.log(`3️⃣ Загружаем ${inspection.videos.length} видео...`);
-            for (let i = 0; i < inspection.videos.length; i++) {
-              const video = inspection.videos[i];
-              const fileName = `video_${String(i + 1).padStart(3, '0')}.mp4`;
-              const filePath = `${folderPath}/${fileName}`;
-
-              try {
-                await uploadFile(yandexAuth.accessToken, filePath, video.uri);
-                uploadedVideos++;
-              } catch (error: any) {
-                console.warn(`❌ Ошибка загрузки видео ${i + 1}:`, error.message);
-                videoErrors.push(`Видео ${i + 1}: ${error.message}`);
-              }
-              
-              setUploadProgress(prev => ({
-                ...prev,
-                current: prev.current + 1
-              }));
+          // 6. Помечаем осмотр как завершённый
+          completeInspection(inspection.id, publicUrl);
+          
+          return { 
+            success: true, 
+            url: publicUrl, 
+            isDemo: false,
+            stats: {
+              totalPhotos: inspection.photos.length,
+              uploadedPhotos,
+              totalVideos: inspection.videos.length,
+              uploadedVideos,
+              photoErrors,
+              videoErrors
             }
-          }
-
-          // 5. Проверяем, загружено ли что-то
-          if (uploadedPhotos === 0 && uploadedVideos === 0) {
-            throw new ApplicationError(
-              ErrorType.UPLOAD,
-              'Не удалось загрузить ни одного файла',
-              { photoErrors, videoErrors }
-            );
-          }
-
-          // 6. Публикуем папку
-          console.log('4️⃣ Публикуем папку...');
-          try {
-            const publicUrl = await publishFolder(yandexAuth, folderPath);
-            console.log('✅ Публичная ссылка получена:', publicUrl);
-            
-            // 7. Помечаем осмотр как завершённый
-            completeInspection(inspection.id, publicUrl);
-            
-            return { 
-              success: true, 
-              url: publicUrl, 
-              isDemo: false,
-              stats: {
-                totalPhotos: inspection.photos.length,
-                uploadedPhotos,
-                totalVideos: inspection.videos.length,
-                uploadedVideos,
-                photoErrors,
-                videoErrors
-              }
-            };
-          } catch (publishError: any) {
-            console.error('❌ Ошибка публикации:', publishError);
-            
-            // Даже если публикация не удалась, осмотр все равно завершаем
-            completeInspection(inspection.id, '');
-            
-            throw new ApplicationError(
-              ErrorType.UPLOAD,
-              'Файлы загружены, но не удалось получить публичную ссылку',
-              publishError
-            );
-          }
-        }
-      },
-      'uploadToYandexDisk', // Контекст для логов
-      (result) => {
-        // Успешная загрузка
-        console.log('✅ Загрузка завершена успешно:', result);
-        
-        if (result.isDemo) {
-          Alert.alert(
-            'Готово!',
-            'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
-            [{ text: 'OK' }]
-          );
-        } else {
-          // Проверяем, были ли частичные ошибки
-          if (result.stats && 
-              (result.stats.photoErrors.length > 0 || result.stats.videoErrors.length > 0)) {
-            
-            const errorCount = result.stats.photoErrors.length + result.stats.videoErrors.length;
-            const successCount = result.stats.uploadedPhotos + result.stats.uploadedVideos;
-            
-            Alert.alert(
-              'Частично успешно',
-              `Загружено ${successCount} из ${result.stats.totalPhotos + result.stats.totalVideos} файлов\n` +
-              `(${errorCount} файлов не загружено)`,
-              [{ text: 'OK' }]
-            );
-          } else {
-            Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
-          }
-        }
-        
-        // Переходим на главный экран
-        router.replace('/');
-      },
-      (error) => {
-        // Кастомная обработка ошибки (вызывается при ошибке)
-        console.error('❌ Ошибка загрузки через handler:', error);
-        
-        // Показываем ошибку в ErrorDisplay
-        showError(error);
-
-        // Сбрасываем статус загрузки
-        updateInspectionStatus(inspection.id, 'active');
-        finishUpload(inspection.id);
-        setUploadProgress({ current: 0, total: 0 });
-        
-        // Дополнительные действия для специфических ошибок
-        if (error.type === ErrorType.AUTH) {
-          // Если ошибка авторизации, предлагаем переподключиться
-          Alert.alert(
-            'Ошибка авторизации',
-            'Необходимо заново подключить Яндекс.Диск',
-            [
-              { text: 'Отмена', style: 'cancel' },
-              { 
-                text: 'Подключить', 
-                onPress: () => router.push('/auth') 
-              }
-            ]
+          };
+        } catch (publishError: any) {
+          console.error('❌ Ошибка публикации:', publishError);
+          
+          // Даже если публикация не удалась, осмотр все равно завершаем
+          completeInspection(inspection.id, '');
+          
+          throw new ApplicationError(
+            ErrorType.UPLOAD,
+            'Файлы загружены, но не удалось получить публичную ссылку',
+            publishError
           );
         }
       }
-    );
-  };
+    },
+    'uploadToYandexDisk',
+    (result) => {
+      // Успешная загрузка
+      console.log('✅ Загрузка завершена успешно:', result);
+      
+      // Очищаем abort controller
+      setAbortController(null);
+      
+      if (result.isDemo) {
+        Alert.alert(
+          'Готово!',
+          'В демо-режиме загрузка имитируется. В реальном приложении файлы загрузятся на Яндекс Диск.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Проверяем, были ли частичные ошибки
+        if (result.stats && 
+            (result.stats.photoErrors.length > 0 || result.stats.videoErrors.length > 0)) {
+          
+          const errorCount = result.stats.photoErrors.length + result.stats.videoErrors.length;
+          const successCount = result.stats.uploadedPhotos + result.stats.uploadedVideos;
+          
+          Alert.alert(
+            'Частично успешно',
+            `Загружено ${successCount} из ${result.stats.totalPhotos + result.stats.totalVideos} файлов\n` +
+            `(${errorCount} файлов не загружено)`,
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert('Успешно!', 'Осмотр завершен и загружен на Яндекс Диск');
+        }
+      }
+      
+      // Переходим на главный экран
+      router.replace('/');
+    },
+    (error) => {
+      // Очищаем abort controller при ошибке
+      setAbortController(null);
+      
+      // Кастомная обработка ошибки (вызывается при ошибке)
+      console.error('❌ Ошибка загрузки через handler:', error);
+      
+      // Если ошибка - "Загрузка отменена", обрабатываем отдельно
+      if (error.message === 'Загрузка отменена') {
+        console.log('ℹ️ Загрузка была отменена пользователем');
+        // Не показываем ошибку, просто сбрасываем состояние
+      } else {
+        // Показываем ошибку в ErrorDisplay
+        showError(error);
+      }
+
+      // Сбрасываем статус загрузки
+      updateInspectionStatus(inspection.id, 'active');
+      finishUpload(inspection.id);
+      setUploadProgress({ current: 0, total: 0 });
+      
+      // Дополнительные действия для специфических ошибок
+      if (error.type === ErrorType.AUTH) {
+        // Если ошибка авторизации, предлагаем переподключиться
+        Alert.alert(
+          'Ошибка авторизации',
+          'Необходимо заново подключить Яндекс.Диск',
+          [
+            { text: 'Отмена', style: 'cancel' },
+            { 
+              text: 'Подключить', 
+              onPress: () => router.push('/auth') 
+            }
+          ]
+        );
+      }
+    }
+  );
+};
 
   const handleShareLink = async () => {
   // Проверяем, что ссылка существует
@@ -422,25 +497,42 @@ export default function InspectionDetailsScreen() {
 
   // Функция для отмены загрузки
   const handleCancelUpload = () => {
-    Alert.alert(
-      'Отменить загрузку?',
-      'Загрузка на Яндекс.Диск будет прервана, но осмотр останется',
-      [
-        { text: 'Продолжить загрузку', style: 'cancel' },
-        {
-          text: 'Отменить',
-          style: 'destructive',
-          onPress: () => {
-            cancelUpload(inspection.id);
-            Alert.alert(
-              'Загрузка отменена',
-              'Осмотр сохранён. Вы можете загрузить его позже, нажав "Завершить осмотр"'
-            );
-          },
+  Alert.alert(
+    'Остановить загрузку?',
+    'Загрузка будет прервана. Вы сможете продолжить позже.',
+    [
+      { text: 'Продолжить', style: 'cancel' },
+      {
+        text: 'Остановить',
+        style: 'destructive',
+        onPress: () => {
+          // 1. Отменяем через AbortController
+          if (abortController) {
+            console.log('🛑 Отменяем загрузку через AbortController');
+            abortController.abort();
+          }
+          
+          // 2. Отменяем в контексте
+          cancelUpload(inspection.id);
+          
+          // 3. Меняем статус
+          updateInspectionStatus(inspection.id, 'active');
+          
+          // 4. Сбрасываем прогресс
+          setUploadProgress({ current: 0, total: 0 });
+          
+          // 5. Очищаем abort controller
+          setAbortController(null);
+          
+          Alert.alert(
+            'Загрузка остановлена',
+            'Осмотр сохранён. Нажмите "Завершить осмотр" чтобы продолжить загрузку.'
+          );
         },
-      ]
-    );
-  };
+      },
+    ]
+  );
+};
 
   // Функция для удаления осмотра
   const handleDeleteInspection = () => {

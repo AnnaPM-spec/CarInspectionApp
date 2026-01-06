@@ -14,9 +14,15 @@ export interface YandexDiskFile {
 // Функция для рекурсивного создания папок (если не существует)
 export const ensureFolderExists = async (
   accessToken: string,
-  folderPath: string
+  folderPath: string,
+  signal?: AbortSignal
 ): Promise<boolean> => {
   console.log(`🔄 Создаем/проверяем папку: "${folderPath}"`);
+
+   // Проверяем отмену
+  if (signal?.aborted) {
+    throw new Error('Операция отменена');
+  }
   
   // Разбиваем путь на части и создаем рекурсивно
   const parts = folderPath.split('/').filter(Boolean);
@@ -24,6 +30,11 @@ export const ensureFolderExists = async (
   
   for (const part of parts) {
     currentPath += `/${part}`;
+
+    // Проверяем отмену перед каждой папкой
+    if (signal?.aborted) {
+      throw new Error('Операция отменена');
+    }
     
     try {
       // 1. Пытаемся создать папку
@@ -36,6 +47,7 @@ export const ensureFolderExists = async (
             'Accept': 'application/json',
             'Content-Type': 'application/json'
           },
+          signal,
         }
       );
       
@@ -69,9 +81,13 @@ export const ensureFolderExists = async (
         console.log(`✅ Папка "${currentPath}" доступна:`, data);
       }
       
-    } catch (error) {
-      console.error(`❌ Критическая ошибка для папки "${currentPath}":`, error);
+    } catch (error: any) {
+            if (error.name === 'AbortError' || error.message === 'Операция отменена') {
+        throw new Error('Операция отменена');
+      }
+            console.error(`❌ Критическая ошибка для папки "${currentPath}":`, error);
       throw error;
+
     }
   }
   
@@ -98,7 +114,8 @@ export const createFolder = async (
 export const uploadFile = async (
   accessToken: string,
   filePath: string,
-  localUri: string
+  localUri: string,
+  signal?: AbortSignal
 ): Promise<void> => {
   try {
     console.log(`🔄 Начинаем загрузку файла: ${filePath}`);
@@ -112,6 +129,7 @@ export const uploadFile = async (
           Authorization: `OAuth ${accessToken}`,
           'Accept': 'application/json'
         },
+        signal,
       }
     );
 
@@ -159,7 +177,12 @@ export const uploadFile = async (
         'Content-Type': 'application/octet-stream',
         'Content-Length': byteArray.length.toString(),
       },
+      signal,
     });
+        // Если отменено, выбрасываем ошибку отмены
+    if (signal?.aborted) {
+      throw new Error('Загрузка отменена');
+    }
 
     if (!uploadResult.ok) {
       console.error(`❌ Ошибка загрузки файла ${filePath}:`, uploadResult.status, uploadResult.statusText);
@@ -169,7 +192,12 @@ export const uploadFile = async (
     }
     
     console.log(`✅ Файл ${filePath} успешно загружен`);
-  } catch (error) {
+  } catch (error: any) {
+     // Проверяем, была ли отмена
+    if (error.name === 'AbortError' || error.message === 'Загрузка отменена') {
+      console.log(`🛑 Загрузка файла ${filePath} отменена`);
+      throw new Error('Загрузка отменена');
+    }
     console.error(`❌ Критическая ошибка загрузки файла ${filePath}:`, error);
     throw error;
   }
@@ -179,7 +207,8 @@ export const uploadFileWithMimeType = async (
   accessToken: string,
   filePath: string,
   localUri: string,
-  mimeType: string = 'application/octet-stream'
+  mimeType: string = 'application/octet-stream',
+  signal?: AbortSignal
 ): Promise<void> => {
   try {
     console.log(`🔄 Начинаем загрузку файла: ${filePath}`);
@@ -192,6 +221,7 @@ export const uploadFileWithMimeType = async (
           Authorization: `OAuth ${accessToken}`,
           'Accept': 'application/json'
         },
+        signal,
       }
     );
 
@@ -202,11 +232,21 @@ export const uploadFileWithMimeType = async (
 
     const { href } = await uploadResponse.json();
 
+        // Проверяем отмену перед чтением файла
+    if (signal?.aborted) {
+      throw new Error('Загрузка отменена');
+    }
+
     // 2. Читаем файл через expo-file-system
     const fileContent = await FileSystemLegacy.readAsStringAsync(localUri, {
       encoding: 'base64' as any,
     });
     
+        // Проверяем отмену перед конвертацией
+    if (signal?.aborted) {
+      throw new Error('Загрузка отменена');
+    }
+
     // 3. Конвертируем base64 в ArrayBuffer
     const byteCharacters = atob(fileContent);
     const byteArray = new Uint8Array(byteCharacters.length);
@@ -222,15 +262,23 @@ export const uploadFileWithMimeType = async (
         'Content-Type': mimeType,
         'Content-Length': byteArray.length.toString(),
       },
+      signal,
     });
-
+ // Проверяем отмену
+    if (signal?.aborted) {
+      throw new Error('Загрузка отменена');
+    }
     if (!uploadResult.ok) {
       const errorText = await uploadResult.text();
       throw new Error(`Upload failed: ${uploadResult.status} - ${errorText}`);
     }
     
     console.log(`✅ Файл успешно загружен`);
-  } catch (error) {
+  } catch (error: any) {
+        if (error.name === 'AbortError' || error.message === 'Загрузка отменена') {
+      console.log(`🛑 Загрузка файла отменена`);
+      throw new Error('Загрузка отменена');
+    }
     console.error('Error uploading file:', error);
     throw error;
   }
@@ -238,8 +286,12 @@ export const uploadFileWithMimeType = async (
 
 export const publishFolder = async (
   auth: YandexDiskAuth,
-  folderPath: string
+  folderPath: string,
+  signal?: AbortSignal
 ): Promise<string> => {
+  if (signal?.aborted) {
+    throw new Error('Операция отменена');
+  }
   const response = await fetch(
     `${YANDEX_API_BASE}/resources/publish?path=${encodeURIComponent(folderPath)}`,
     {
@@ -247,11 +299,16 @@ export const publishFolder = async (
       headers: {
         Authorization: `OAuth ${auth.accessToken}`,
       },
+      signal,
     }
   );
 
   if (!response.ok) {
     throw new Error('Failed to publish folder');
+  }
+// Проверяем отмену перед вторым запросом
+  if (signal?.aborted) {
+    throw new Error('Операция отменена');
   }
 
   const resourceResponse = await fetch(
@@ -260,6 +317,7 @@ export const publishFolder = async (
       headers: {
         Authorization: `OAuth ${auth.accessToken}`,
       },
+      signal,
     }
   );
 
