@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useInspections } from '../context/InspectionContext';
+import Constants from 'expo-constants'; 
 
 // Настройка discovery для Яндекс OAuth
 const discovery = {
@@ -35,8 +36,10 @@ export default function AuthScreen() {
   };
 
 // Получаем clientId из переменных окружения
-const clientId = process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
-
+  const clientId = 
+    Constants.expoConfig?.extra?.yandexClientId || 
+    process.env.EXPO_PUBLIC_YANDEX_CLIENT_ID;
+    
 // Для Android Intent используем простую схему
 const redirectUri = 'app.rork.carinspectionapp://oauth-callback';
 console.log('Android Intent redirectUri:', redirectUri);
